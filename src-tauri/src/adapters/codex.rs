@@ -61,12 +61,18 @@ pub fn feed(acc: &mut Acc, riga: &Value) {
         ("event_msg", "token_count") => {
             // totale cumulativo della sessione: si sostituisce, non si somma
             if let Some(u) = p.pointer("/info/total_token_usage") {
+                let totale = u.get("total_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
                 acc.token = Token {
                     input: u.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0),
                     output: u.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0),
                     cache_lettura: u.get("cached_input_tokens").and_then(|v| v.as_u64()).unwrap_or(0),
                     cache_scrittura: u.get("cache_write_input_tokens").and_then(|v| v.as_u64()).unwrap_or(0),
                 };
+                // l'app desktop scrive solo il totale: lo si conta come input per non mostrare zero
+                let parti = acc.token.input + acc.token.output + acc.token.cache_lettura + acc.token.cache_scrittura;
+                if parti == 0 && totale > 0 {
+                    acc.token.input = totale;
+                }
             }
             acc.tocca(ts);
         }

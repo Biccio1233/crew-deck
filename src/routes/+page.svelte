@@ -34,6 +34,9 @@
   let aperta = $state<string | null>(null);
   let ora = $state(Date.now());
   let caricato = $state(false);
+  let espansi = $state<Record<string, boolean>>({});
+  const LIMITE = 5;
+  const compatta = (st: Stato) => st === "finito" || st === "inattivo";
 
   const umane = $derived(sessioni.filter((s) => automatiche || !s.automatica));
   const conta = $derived(
@@ -145,8 +148,8 @@
       <section class={sez.stato}>
         <h2>{sez.titolo} <span>{sez.righe.length}</span></h2>
         <ul>
-          {#each sez.righe as s (chiave(s))}
-            <li class:aperta={aperta === chiave(s)}>
+          {#each (espansi[sez.stato] || filtro === sez.stato ? sez.righe : sez.righe.slice(0, LIMITE)) as s (chiave(s))}
+            <li class:aperta={aperta === chiave(s)} class:compatta={compatta(s.stato) && aperta !== chiave(s)}>
               <button class="riga" onclick={() => (aperta = aperta === chiave(s) ? null : chiave(s))} aria-expanded={aperta === chiave(s)}>
                 <span class="ico"><Icona stato={s.stato} /></span>
                 <span class="principale">
@@ -163,7 +166,7 @@
                   <span class="tempo">{trascorso(s.da_quando)}{#if s.posizione}<span class="dove" title={s.posizione.tty ?? ""}>{" · "}{nomeApp(s.posizione.app)}</span>{/if}</span>
                   <span class="etichette">
                     <span class="agente {s.agente}">{AGENTI[s.agente]}</span>
-                    {#if appDesktop(s)}<span class="ruolo app">app</span>{/if}
+                    {#if appDesktop(s)}<span class="ruolo desk">app</span>{/if}
                     <span class="ruolo">{RUOLI[s.ruolo] ?? s.ruolo}</span>
                   </span>
                   <span class="numeri">{token(s)} tok{#if s.costo_usd != null}{" · "}${s.costo_usd.toFixed(2)}{/if}</span>
@@ -194,6 +197,11 @@
             </li>
           {/each}
         </ul>
+        {#if sez.righe.length > LIMITE && filtro !== sez.stato}
+          <button class="altri" onclick={() => (espansi[sez.stato] = !espansi[sez.stato])}>
+            {espansi[sez.stato] ? "Mostra meno" : `Mostra altre ${sez.righe.length - LIMITE}`}
+          </button>
+        {/if}
       </section>
     {/each}
   </main>
@@ -310,6 +318,17 @@
   section.aspetta .vai.viva:hover { background: var(--tinta-aspetta); }
   .vai:disabled { opacity: 0.45; cursor: default; }
   .dove { color: var(--testo-3); }
+  /* righe compatte: chi ha finito o è in porto occupa una riga sola */
+  li.compatta .riga { padding-top: 7px; padding-bottom: 7px; align-items: center; }
+  li.compatta .principale { flex-direction: row; gap: 10px; align-items: baseline; }
+  li.compatta .azione, li.compatta .richiesta, li.compatta .numeri { display: none; }
+  li.compatta .lato { grid-auto-flow: column; align-items: center; gap: 8px; }
+  li.compatta .vai { margin-top: 6px; }
+  .altri {
+    margin: 6px 20px 0; border: 0; background: transparent; color: var(--testo-3); cursor: pointer; padding: 4px 0;
+    font-size: 12px;
+  }
+  .altri:hover { color: var(--testo); }
   .esito {
     position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); max-width: min(560px, calc(100vw - 32px));
     padding: 8px 14px; border-radius: 8px; background: var(--pannello); border: 1px solid var(--bordo);
@@ -320,7 +339,7 @@
   section.aspetta li { background: var(--tinta-aspetta); }
 
   .riga {
-    width: 100%; min-width: 0; display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 12px;
+    width: 100%; min-width: 0; display: grid; grid-template-columns: 28px minmax(0, 1fr) max-content; grid-template-rows: auto; gap: 12px;
     align-items: start; padding: 10px 12px 10px 16px; border: 0; background: transparent; text-align: left;
     cursor: pointer; transition: background 150ms;
   }
@@ -339,9 +358,9 @@
   .richiesta { color: var(--testo-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 12.5px; }
   .richiesta::before { content: "↳ "; opacity: 0.7; }
 
-  .lato { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+  .lato { display: grid; justify-items: end; align-content: start; gap: 4px; }
   .tempo { font-variant-numeric: tabular-nums; color: var(--testo-2); font-size: 12px; }
-  .etichette { display: flex; gap: 4px; }
+  .etichette { display: flex; gap: 4px; align-items: center; flex-wrap: nowrap; height: 20px; }
   .agente, .ruolo {
     font-size: 11px; padding: 1px 7px; border-radius: 4px; border: 1px solid var(--bordo); color: var(--testo-2);
     white-space: nowrap;
