@@ -126,3 +126,22 @@ pub fn riprendi(agente: Agente, id: &str, file: &str, cwd: &str, terminale: &str
 fn shell_q(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
 }
+
+/// Indirizzo per aprire una sessione nata in un'app desktop, sulla conversazione giusta.
+pub fn link_desktop(agente: Agente, id: &str, origine: Option<&str>) -> Option<(String, &'static str)> {
+    let o = origine.unwrap_or("");
+    let id_ok = !id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+    if !id_ok {
+        return None;
+    }
+    match agente {
+        Agente::Claude if o == "claude-desktop" => Some((format!("claude://resume?session={id}"), "app Claude")),
+        Agente::Codex if o.starts_with("Codex Desktop") => Some((format!("codex://threads/{id}"), "app Codex")),
+        _ => None,
+    }
+}
+
+pub fn apri_link(url: &str, nome: &str) -> Esito {
+    let st = Command::new("open").arg(url).status().map_err(|e| e.to_string())?;
+    if st.success() { Ok(format!("Aperta nell'{nome}")) } else { Err(format!("Non riesco ad aprire l'{nome}")) }
+}

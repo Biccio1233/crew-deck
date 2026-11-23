@@ -63,7 +63,11 @@
   const chiave = (s: Vista) => s.agente + ":" + s.id;
   const NOMI_APP: Record<string, string> = { Terminal: "Terminale", Code: "VS Code", Claude: "app Claude", Codex: "app Codex" };
   const nomeApp = (a: string) => NOMI_APP[a] ?? a;
-  const etichettaAzione = (s: Vista) => (s.posizione ? `Apri in ${nomeApp(s.posizione.app)}` : "Riprendi");
+  const appDesktop = (s: Vista) =>
+    s.agente === "claude" && s.origine === "claude-desktop" ? "app Claude"
+    : s.agente === "codex" && (s.origine ?? "").startsWith("Codex Desktop") ? "app Codex" : null;
+  const etichettaAzione = (s: Vista) =>
+    appDesktop(s) ? `Apri nell'${appDesktop(s)}` : s.posizione ? `Apri in ${nomeApp(s.posizione.app)}` : "Riprendi";
 
   let esito = $state<{ testo: string; errore: boolean } | null>(null);
   let inCorso = $state<string | null>(null);
@@ -159,14 +163,15 @@
                   <span class="tempo">{trascorso(s.da_quando)}{#if s.posizione}<span class="dove" title={s.posizione.tty ?? ""}>{" · "}{nomeApp(s.posizione.app)}</span>{/if}</span>
                   <span class="etichette">
                     <span class="agente {s.agente}">{AGENTI[s.agente]}</span>
+                    {#if appDesktop(s)}<span class="ruolo app">app</span>{/if}
                     <span class="ruolo">{RUOLI[s.ruolo] ?? s.ruolo}</span>
                   </span>
                   <span class="numeri">{token(s)} tok{#if s.costo_usd != null}{" · "}${s.costo_usd.toFixed(2)}{/if}</span>
                 </span>
               </button>
-              <button class="vai" class:viva={!!s.posizione} disabled={inCorso === chiave(s) || (!s.posizione && !s.cartella)}
+              <button class="vai" class:viva={!!s.posizione || !!appDesktop(s)} disabled={inCorso === chiave(s) || (!s.posizione && !appDesktop(s) && !s.cartella)}
                 onclick={() => apri(s)} title={s.posizione ? "Porta in primo piano la scheda dove gira" : "Apre una scheda nuova nella cartella e riprende la sessione"}>
-                {#if s.posizione}
+                {#if s.posizione || appDesktop(s)}
                   <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3h7v7M13 3L6.5 9.5M11 9.5V13H3V5h3.5" /></svg>
                 {:else}
                   <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8a5 5 0 1 0 1.5-3.5M3 2.5V5h2.5" /></svg>

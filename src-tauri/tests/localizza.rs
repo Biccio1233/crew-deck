@@ -46,3 +46,12 @@ fn collega_cmux_esatto_e_ghostty_per_cartella() {
     // la sessione più vecchia nella stessa cartella non prende lo stesso processo
     assert!(!m.contains_key("claude:c-0"));
 }
+
+#[test]
+fn link_delle_app_desktop() {
+    use crew_deck_lib::azioni::link_desktop;
+    assert_eq!(link_desktop(Agente::Claude, "95b72bce-cfa2-4a0b-a098-f7d0c97a4497", Some("claude-desktop")).unwrap().0, "claude://resume?session=95b72bce-cfa2-4a0b-a098-f7d0c97a4497");
+    assert_eq!(link_desktop(Agente::Codex, "01a1f495-6c75", Some("Codex Desktop")).unwrap().0, "codex://threads/01a1f495-6c75");
+    assert!(link_desktop(Agente::Claude, "abc", Some("cli")).is_none());
+    assert!(link_desktop(Agente::Codex, "x;rm -rf", Some("Codex Desktop")).is_none());
+}

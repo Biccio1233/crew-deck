@@ -38,11 +38,15 @@ fn agente_da(s: &str) -> Result<model::Agente, String> {
 #[tauri::command]
 fn apri_sessione(plancia: tauri::State<Plancia>, agente: String, id: String, terminale: Option<String>) -> Result<String, String> {
     let ag = agente_da(&agente)?;
-    let (pos, file, cwd, ultima_app) = {
+    let (pos, file, cwd, ultima_app, origine) = {
         let mut s = plancia.0.lock().unwrap();
         s.localizza_ora();
         s.per_azione(ag, &id).ok_or("sessione non trovata")?
     };
+    // sessioni nate nelle app desktop: si aprono nell'app, sulla conversazione giusta
+    if let Some((url, nome)) = azioni::link_desktop(ag, &id, origine.as_deref()) {
+        return azioni::apri_link(&url, nome);
+    }
     if let Some(p) = pos {
         return azioni::vai(&p);
     }

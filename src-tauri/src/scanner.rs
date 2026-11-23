@@ -101,10 +101,10 @@ impl Scanner {
     }
 
     /// Dati per le azioni: posizione, file, cartella, ultima app.
-    pub fn per_azione(&self, agente: Agente, id: &str) -> Option<(Option<Posizione>, String, Option<String>, Option<String>)> {
+    pub fn per_azione(&self, agente: Agente, id: &str) -> Option<(Option<Posizione>, String, Option<String>, Option<String>, Option<String>)> {
         let k = chiave(agente, id);
         let l = self.lettori.values().find(|l| l.acc.agente == agente && l.acc.id == id)?;
-        Some((self.posizioni.get(&k).cloned(), l.acc.file.to_string_lossy().to_string(), l.acc.cwd.clone(), self.ultima_app.get(&k).cloned()))
+        Some((self.posizioni.get(&k).cloned(), l.acc.file.to_string_lossy().to_string(), l.acc.cwd.clone(), self.ultima_app.get(&k).cloned(), l.acc.origine.clone()))
     }
 
     pub fn viste(&self, ora: i64) -> Vec<Vista> {
