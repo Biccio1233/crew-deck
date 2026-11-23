@@ -73,9 +73,9 @@ Lo skipper sei tu. Regole in una tabella modificabile, non nel codice.
 ### 6.4 Notifiche
 Notifica di sistema quando una sessione passa a 🚩 o a 🏁 dopo più di N minuti di lavoro. Silenziabili per progetto. Suono opzionale (fischio da regata).
 
-### 6.5 Azioni
-- **Apri il terminale** nella cartella della sessione (Ghostty, iTerm, Terminal, Windows Terminal, scelto nelle impostazioni).
-- **Riprendi** la sessione: `claude --resume <id>`, `codex resume <id>`, `pi --continue` (comando mostrato e copiabile; lanciato solo con un clic esplicito).
+### 6.5 Azioni (fatto il 23/11 per macOS)
+- **Apri in <app>**: se la sessione è viva, Crew Deck sa dove gira (processo → app ospite → tty) e porta in primo piano **la scheda esatta**: Ghostty, Terminale e iTerm via AppleScript sul tty; cmux via `select-workspace` + `focus-panel` usando il registro `cmux sessions list` (collegamento esatto per id di sessione). cmux accetta comandi da fuori solo in modalità password (Impostazioni › Automazione; password nel portachiavi, servizio `crew-deck`, account `cmux`); altrimenti porta cmux in primo piano. Altre app (VS Code, app Claude/Codex): attivate.
+- **Riprendi**: se è chiusa, apre una scheda nuova nella cartella della sessione, nell'ultima app dove girava (Ghostty di default), con `claude --resume <id>`, `codex resume <id>`, `pi --session <file>`; lanciato solo con un clic esplicito.
 - **Apri la cartella** nel file manager o nell'editor.
 - Fermare un agente: fuori dalla v1 (rischioso, nessun modo pulito comune ai tre).
 

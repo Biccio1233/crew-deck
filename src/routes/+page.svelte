@@ -12,6 +12,8 @@
     automatica: boolean; origine: string | null;
     token: { input: number; output: number; cache_lettura: number; cache_scrittura: number };
     stato: Stato; motivo: string; stimato: boolean; da_quando: number; azione: string;
+    file: string; ultima_app: string | null;
+    posizione: { app: string; pid: number; tty: string | null; cmux_surface: string | null; incerta: boolean } | null;
   };
 
   const SEZIONI: { stato: Stato; titolo: string; filtro: string }[] = [
@@ -59,6 +61,27 @@
     return t >= 1e6 ? `${(t / 1e6).toFixed(1)} M` : t >= 1e3 ? `${Math.round(t / 1e3)} k` : `${t}`;
   }
   const chiave = (s: Vista) => s.agente + ":" + s.id;
+  const NOMI_APP: Record<string, string> = { Terminal: "Terminale", Code: "VS Code", Claude: "app Claude", Codex: "app Codex" };
+  const nomeApp = (a: string) => NOMI_APP[a] ?? a;
+  const etichettaAzione = (s: Vista) => (s.posizione ? `Apri in ${nomeApp(s.posizione.app)}` : "Riprendi");
+
+  let esito = $state<{ testo: string; errore: boolean } | null>(null);
+  let inCorso = $state<string | null>(null);
+  let timerEsito: ReturnType<typeof setTimeout> | undefined;
+
+  async function apri(s: Vista) {
+    inCorso = chiave(s);
+    try {
+      const testo = await invoke<string>("apri_sessione", { agente: s.agente, id: s.id });
+      esito = { testo, errore: false };
+    } catch (e) {
+      esito = { testo: String(e), errore: true };
+    } finally {
+      inCorso = null;
+      clearTimeout(timerEsito);
+      timerEsito = setTimeout(() => (esito = null), 5000);
+    }
+  }
 
   onMount(() => {
     // anteprima nel browser (senza Tauri): legge un file di esempio
@@ -133,13 +156,22 @@
                   {#if s.richiesta}<span class="richiesta">{s.richiesta}</span>{/if}
                 </span>
                 <span class="lato">
-                  <span class="tempo">{trascorso(s.da_quando)}</span>
+                  <span class="tempo">{trascorso(s.da_quando)}{#if s.posizione}<span class="dove" title={s.posizione.tty ?? ""}>{" · "}{nomeApp(s.posizione.app)}</span>{/if}</span>
                   <span class="etichette">
                     <span class="agente {s.agente}">{AGENTI[s.agente]}</span>
                     <span class="ruolo">{RUOLI[s.ruolo] ?? s.ruolo}</span>
                   </span>
                   <span class="numeri">{token(s)} tok{#if s.costo_usd != null}{" · "}${s.costo_usd.toFixed(2)}{/if}</span>
                 </span>
+              </button>
+              <button class="vai" class:viva={!!s.posizione} disabled={inCorso === chiave(s) || (!s.posizione && !s.cartella)}
+                onclick={() => apri(s)} title={s.posizione ? "Porta in primo piano la scheda dove gira" : "Apre una scheda nuova nella cartella e riprende la sessione"}>
+                {#if s.posizione}
+                  <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3h7v7M13 3L6.5 9.5M11 9.5V13H3V5h3.5" /></svg>
+                {:else}
+                  <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8a5 5 0 1 0 1.5-3.5M3 2.5V5h2.5" /></svg>
+                {/if}
+                {inCorso === chiave(s) ? "…" : etichettaAzione(s)}
               </button>
               {#if aperta === chiave(s)}
                 <dl class="dettagli">
@@ -150,6 +182,7 @@
                   <div><dt>Token</dt><dd class="mono">in {s.token.input} · out {s.token.output} · cache {s.token.cache_lettura}/{s.token.cache_scrittura}</dd></div>
                   {#if s.errori}<div><dt>Errori</dt><dd class="err">{s.errori}</dd></div>{/if}
                   <div><dt>Origine</dt><dd>{s.origine ?? AGENTI[s.agente]}{s.automatica ? " · automatica" : ""}</dd></div>
+                  <div><dt>Dove gira</dt><dd>{s.posizione ? `${nomeApp(s.posizione.app)}${s.posizione.tty ? " · " + s.posizione.tty.replace("/dev/", "") : ""}${s.posizione.incerta ? " · collegamento stimato" : ""}` : s.ultima_app ? `chiusa (ultima volta in ${nomeApp(s.ultima_app)})` : "chiusa"}</dd></div>
                   <div><dt>Sessione</dt><dd class="mono">{s.id}</dd></div>
                 </dl>
               {/if}
@@ -159,6 +192,10 @@
       </section>
     {/each}
   </main>
+
+  {#if esito}
+    <div class="esito" class:errore={esito.errore} role="status">{esito.testo}</div>
+  {/if}
 </div>
 
 <style>
@@ -254,13 +291,32 @@
   h2 span { font-variant-numeric: tabular-nums; }
   section.aspetta h2 { color: var(--c-aspetta); }
   ul { list-style: none; margin: 0; padding: 0; }
-  li { border-top: 1px solid var(--bordo); }
+  li { border-top: 1px solid var(--bordo); display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; }
+  li > .dettagli { grid-column: 1 / -1; }
+  .vai {
+    margin: 10px 16px 0 0; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
+    border: 1px solid var(--bordo); background: transparent; color: var(--testo-2); border-radius: 6px;
+    padding: 4px 10px; cursor: pointer; font-size: 12px; width: 156px; justify-content: flex-start; transition: background 150ms, color 150ms, border-color 150ms;
+  }
+  .vai svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+  .vai:hover:not(:disabled) { background: var(--riga-hover); color: var(--testo); }
+  .vai.viva { color: var(--testo); }
+  section.aspetta .vai.viva { border-color: var(--c-aspetta); color: var(--c-aspetta); }
+  section.aspetta .vai.viva:hover { background: var(--tinta-aspetta); }
+  .vai:disabled { opacity: 0.45; cursor: default; }
+  .dove { color: var(--testo-3); }
+  .esito {
+    position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); max-width: min(560px, calc(100vw - 32px));
+    padding: 8px 14px; border-radius: 8px; background: var(--pannello); border: 1px solid var(--bordo);
+    color: var(--testo); box-shadow: 0 6px 24px oklch(0 0 0 / 0.25); animation: apri 200ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .esito.errore { border-color: var(--c-aspetta); }
   li:last-child { border-bottom: 1px solid var(--bordo); }
   section.aspetta li { background: var(--tinta-aspetta); }
 
   .riga {
-    width: 100%; display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 12px;
-    align-items: start; padding: 10px 20px 10px 16px; border: 0; background: transparent; text-align: left;
+    width: 100%; min-width: 0; display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 12px;
+    align-items: start; padding: 10px 12px 10px 16px; border: 0; background: transparent; text-align: left;
     cursor: pointer; transition: background 150ms;
   }
   .riga:hover { background: var(--riga-hover); }

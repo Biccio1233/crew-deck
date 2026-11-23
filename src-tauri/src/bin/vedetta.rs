@@ -12,6 +12,17 @@ fn main() {
     let seconda = t1.elapsed();
     let tutte = std::env::args().any(|a| a == "--tutte");
     let viste: Vec<_> = s.viste(ora_ms()).into_iter().filter(|v| tutte || !v.automatica).collect();
+    let args: Vec<String> = std::env::args().collect();
+    if let Some(i) = args.iter().position(|a| a == "--apri") {
+        // prova: --apri <agente> <id>  (solo sessioni vive: porta in primo piano la scheda)
+        let ag = match args[i + 1].as_str() { "claude" => crew_deck_lib::model::Agente::Claude, "codex" => crew_deck_lib::model::Agente::Codex, _ => crew_deck_lib::model::Agente::Pi };
+        match s.per_azione(ag, &args[i + 2]) {
+            Some((Some(p), ..)) => println!("{:?}", crew_deck_lib::azioni::vai(&p)),
+            Some((None, ..)) => println!("sessione chiusa: nessuna scheda da aprire"),
+            None => println!("sessione non trovata"),
+        }
+        return;
+    }
     if std::env::args().any(|a| a == "--json") {
         println!("{}", serde_json::to_string(&s.viste(ora_ms())).unwrap());
         return;

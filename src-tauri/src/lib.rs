@@ -1,5 +1,7 @@
 //! Crew Deck: la plancia dell'equipaggio degli agenti AI.
 pub mod adapters;
+pub mod azioni;
+pub mod localizza;
 pub mod engine;
 pub mod model;
 pub mod scanner;
@@ -23,6 +25,32 @@ fn sessioni(plancia: tauri::State<Plancia>) -> Vec<Vista> {
     s.viste(ora_ms())
 }
 
+fn agente_da(s: &str) -> Result<model::Agente, String> {
+    match s {
+        "claude" => Ok(model::Agente::Claude),
+        "codex" => Ok(model::Agente::Codex),
+        "pi" => Ok(model::Agente::Pi),
+        _ => Err(format!("agente sconosciuto: {s}")),
+    }
+}
+
+/// Porta in primo piano la scheda dove gira la sessione; se è chiusa, la riprende.
+#[tauri::command]
+fn apri_sessione(plancia: tauri::State<Plancia>, agente: String, id: String, terminale: Option<String>) -> Result<String, String> {
+    let ag = agente_da(&agente)?;
+    let (pos, file, cwd, ultima_app) = {
+        let mut s = plancia.0.lock().unwrap();
+        s.localizza_ora();
+        s.per_azione(ag, &id).ok_or("sessione non trovata")?
+    };
+    if let Some(p) = pos {
+        return azioni::vai(&p);
+    }
+    let cwd = cwd.ok_or("cartella della sessione sconosciuta")?;
+    let term = terminale.or(ultima_app).filter(|t| t == "cmux" || t == "Terminal").unwrap_or_else(|| "Ghostty".into());
+    azioni::riprendi(ag, &id, &file, &cwd, &term)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let home = dirs::home_dir().expect("cartella home non trovata");
@@ -44,7 +72,7 @@ pub fn run() {
             });
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![sessioni])
+        .invoke_handler(tauri::generate_handler![sessioni, apri_sessione])
         .run(tauri::generate_context!())
         .expect("errore all'avvio di Crew Deck");
 }

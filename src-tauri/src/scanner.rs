@@ -1,15 +1,21 @@
 //! Trova i registri dei tre agenti e li tiene aggiornati in memoria.
 use crate::adapters::Lettore;
 use crate::engine::{calcola, ruolo, Calcolo, Opzioni, Ruolo};
+use crate::localizza::{localizza, Cercata, Posizione};
 use crate::model::{Agente, Token};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Vista {
     pub id: String,
+    pub file: String,
+    /// Dove gira adesso, se il processo è vivo.
+    pub posizione: Option<Posizione>,
+    /// Ultima app in cui l'ho vista girare (per riprenderla lì).
+    pub ultima_app: Option<String>,
     pub agente: Agente,
     pub cartella: Option<String>,
     pub progetto: String,
@@ -32,6 +38,9 @@ pub struct Vista {
 pub struct Scanner {
     radici: Vec<(Agente, PathBuf)>,
     lettori: HashMap<PathBuf, Lettore>,
+    posizioni: HashMap<String, Posizione>,
+    ultima_app: HashMap<String, String>,
+    localizzato: Option<Instant>,
     /// Si guardano solo i file toccati negli ultimi N giorni.
     finestra: Duration,
 }
@@ -45,12 +54,15 @@ impl Scanner {
                 (Agente::Pi, home.join(".pi/agent/sessions")),
             ],
             lettori: HashMap::new(),
+            posizioni: HashMap::new(),
+            ultima_app: HashMap::new(),
+            localizzato: None,
             finestra: Duration::from_secs(3 * 24 * 3600),
         }
     }
 
     pub fn con_radici(radici: Vec<(Agente, PathBuf)>, finestra: Duration) -> Self {
-        Scanner { radici, lettori: HashMap::new(), finestra }
+        Scanner { radici, lettori: HashMap::new(), posizioni: HashMap::new(), ultima_app: HashMap::new(), localizzato: None, finestra }
     }
 
     /// Cerca file nuovi e legge le code dei file già noti.
@@ -68,6 +80,31 @@ impl Scanner {
                 let _ = l.aggiorna();
             }
         }
+        // dove gira ogni sessione: ogni 5 secondi basta (ps + lsof costano qualche decina di ms)
+        if self.localizzato.map(|t| t.elapsed() > Duration::from_secs(5)).unwrap_or(true) {
+            self.localizza_ora();
+        }
+    }
+
+    pub fn localizza_ora(&mut self) {
+        let cercate: Vec<Cercata> = self
+            .lettori
+            .values()
+            .filter(|l| l.acc.ultima_attivita > 0 && !l.acc.automatica)
+            .map(|l| Cercata { chiave: chiave(l.acc.agente, &l.acc.id), id: &l.acc.id, agente: l.acc.agente, cwd: l.acc.cwd.as_deref(), ultima_attivita: l.acc.ultima_attivita })
+            .collect();
+        self.posizioni = localizza(&cercate);
+        for (k, p) in &self.posizioni {
+            self.ultima_app.insert(k.clone(), p.app.clone());
+        }
+        self.localizzato = Some(Instant::now());
+    }
+
+    /// Dati per le azioni: posizione, file, cartella, ultima app.
+    pub fn per_azione(&self, agente: Agente, id: &str) -> Option<(Option<Posizione>, String, Option<String>, Option<String>)> {
+        let k = chiave(agente, id);
+        let l = self.lettori.values().find(|l| l.acc.agente == agente && l.acc.id == id)?;
+        Some((self.posizioni.get(&k).cloned(), l.acc.file.to_string_lossy().to_string(), l.acc.cwd.clone(), self.ultima_app.get(&k).cloned()))
     }
 
     pub fn viste(&self, ora: i64) -> Vec<Vista> {
@@ -78,8 +115,12 @@ impl Scanner {
             .filter(|l| l.acc.ultima_attivita > 0)
             .map(|l| {
                 let a = &l.acc;
+                let k = chiave(a.agente, &a.id);
                 Vista {
                     id: a.id.clone(),
+                    file: a.file.to_string_lossy().to_string(),
+                    posizione: self.posizioni.get(&k).cloned(),
+                    ultima_app: self.ultima_app.get(&k).cloned(),
                     agente: a.agente,
                     progetto: a.cwd.as_deref().map(progetto).unwrap_or_else(|| "?".into()),
                     cartella: a.cwd.clone(),
@@ -127,4 +168,8 @@ fn raccogli(dir: &Path, out: &mut Vec<PathBuf>, prof: u8) {
 /// Nome leggibile del progetto: l'ultima cartella del percorso.
 pub fn progetto(cwd: &str) -> String {
     cwd.trim_end_matches(['/', '\\']).rsplit(['/', '\\']).next().unwrap_or(cwd).to_string()
+}
+
+pub fn chiave(agente: Agente, id: &str) -> String {
+    format!("{:?}:{}", agente, id).to_lowercase()
 }
