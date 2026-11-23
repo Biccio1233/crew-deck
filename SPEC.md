@@ -79,7 +79,9 @@ Notifica di sistema quando una sessione passa a 🚩 o a 🏁 dopo più di N min
 - **Apri la cartella** nel file manager o nell'editor.
 - Fermare un agente: fuori dalla v1 (rischioso, nessun modo pulito comune ai tre).
 
-### 6.6 Debriefing — analisi delle richieste
+### 6.6 Debriefing — analisi delle richieste (fatto il 23/11: Sala carteggio + Debriefing + giudice Jev con hook)
+Implementato: `giudice/` (Jev, 7 domande, filtro, esclusione argomenti sensibili, taratura in `giudice/TARATURA.md`), hook globale di Claude Code in background con registro solo numerico, Sala carteggio (compositore, controllo dal vivo con avvisi solo su «come si verifica» e «vincoli», Rifinisci/Approfondisci con `claude -p`, invio nella scheda Ghostty o appunti, nuova sessione), Debriefing (quote, tipi, progetti, consigli). Da fare: giornale di bordo settimanale, esito dei prompt (correzioni/interruzioni dopo un prompt rifinito), giudice per Codex e pi.
+
 - **Statistiche** (locali, sempre): lunghezza delle richieste; turni per arrivare al risultato; correzioni subito dopo («no», «non così», nuova richiesta sullo stesso tema); richieste interrotte; strumenti ed errori per richiesta; costo per richiesta; differenze fra agenti e progetti.
 - **Analisi AI** (opt-in): un campione di richieste, oscurate, va a un modello con l'abbonamento dell'utente (`claude -p` o `codex exec`, nessuna chiave da gestire). Torna con schemi ricorrenti e riscritture suggerite. Opzione **Jev (TypeSafe)** per giudizi tipizzati a basso costo, una domanda per criterio: la richiesta dice il criterio di fine? nomina i file? contiene due richieste in una?
 - **Giornale di bordo**: report settimanale (cosa hai chiesto, cosa ha funzionato, tre consigli).
