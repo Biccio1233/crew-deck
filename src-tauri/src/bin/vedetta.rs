@@ -12,6 +12,10 @@ fn main() {
     let seconda = t1.elapsed();
     let tutte = std::env::args().any(|a| a == "--tutte");
     let viste: Vec<_> = s.viste(ora_ms()).into_iter().filter(|v| tutte || !v.automatica).collect();
+    if std::env::args().any(|a| a == "--json") {
+        println!("{}", serde_json::to_string(&s.viste(ora_ms())).unwrap());
+        return;
+    }
     let n = std::env::args().nth(1).and_then(|x| x.parse().ok()).unwrap_or(15);
     for v in viste.iter().take(n) {
         let icona = match v.calcolo.stato {
