@@ -55,6 +55,8 @@ pub struct Acc {
     pub inizio: Option<i64>,
     pub ultima_attivita: i64,
     pub ultimo_prompt: Option<String>,
+    /// Ultimo testo scritto dall'agente (coda), per dare contesto al giudice e alla riscrittura.
+    pub ultimo_testo: Option<String>,
     pub n_prompt: u32,
     pub aperti: Vec<Strumento>,
     pub ultimo_evento: Ev,
@@ -87,6 +89,7 @@ impl Acc {
             inizio: None,
             ultima_attivita: 0,
             ultimo_prompt: None,
+            ultimo_testo: None,
             n_prompt: 0,
             aperti: Vec::new(),
             ultimo_evento: Ev::Nessuno,
@@ -101,6 +104,14 @@ impl Acc {
             origine: None,
             automatica: false,
             usage_visti: HashMap::new(),
+        }
+    }
+
+    pub fn testo_agente(&mut self, t: &str) {
+        let t = t.trim();
+        if !t.is_empty() {
+            let n = t.chars().count();
+            self.ultimo_testo = Some(if n > 2000 { t.chars().skip(n - 2000).collect() } else { t.to_string() });
         }
     }
 

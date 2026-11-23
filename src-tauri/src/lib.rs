@@ -1,6 +1,7 @@
 //! Crew Deck: la plancia dell'equipaggio degli agenti AI.
 pub mod adapters;
 pub mod azioni;
+pub mod carteggio;
 pub mod localizza;
 pub mod engine;
 pub mod model;
@@ -55,6 +56,52 @@ fn apri_sessione(plancia: tauri::State<Plancia>, agente: String, id: String, ter
     azioni::riprendi(ag, &id, &file, &cwd, &term)
 }
 
+fn contesto_di(plancia: &tauri::State<Plancia>, agente: &Option<String>, id: &Option<String>) -> (Option<localizza::Posizione>, Option<String>) {
+    match (agente, id) {
+        (Some(a), Some(i)) => match agente_da(a) {
+            Ok(ag) => {
+                let mut s = plancia.0.lock().unwrap();
+                s.localizza_ora();
+                s.contesto(ag, i).map(|(p, t, _)| (p, t)).unwrap_or((None, None))
+            }
+            Err(_) => (None, None),
+        },
+        _ => (None, None),
+    }
+}
+
+/// Giudizio di Jev sul prompt, con l'ultimo messaggio dell'agente della sessione scelta come contesto.
+#[tauri::command]
+async fn giudica_prompt(plancia: tauri::State<'_, Plancia>, testo: String, agente: Option<String>, id: Option<String>) -> Result<serde_json::Value, String> {
+    let (_, prima) = contesto_di(&plancia, &agente, &id);
+    tauri::async_runtime::spawn_blocking(move || carteggio::giudica(&testo, prima.as_deref())).await.map_err(|e| e.to_string())?
+}
+
+/// Rifinisci o Approfondisci con Claude.
+#[tauri::command]
+async fn riscrivi_prompt(plancia: tauri::State<'_, Plancia>, modo: String, testo: String, agente: Option<String>, id: Option<String>, mancanti: Vec<String>) -> Result<serde_json::Value, String> {
+    let (_, prima) = contesto_di(&plancia, &agente, &id);
+    tauri::async_runtime::spawn_blocking(move || carteggio::riscrivi(&modo, &testo, prima.as_deref(), &mancanti)).await.map_err(|e| e.to_string())?
+}
+
+/// Scrive il prompt nella scheda della sessione (solo dopo la conferma nell'interfaccia).
+#[tauri::command]
+async fn invia_prompt(plancia: tauri::State<'_, Plancia>, agente: String, id: String, testo: String, invio: bool) -> Result<String, String> {
+    let (pos, _) = contesto_di(&plancia, &Some(agente), &Some(id));
+    let pos = pos.ok_or("la sessione non è aperta in nessun terminale: usa «Nuova sessione»")?;
+    tauri::async_runtime::spawn_blocking(move || carteggio::invia(&pos, &testo, invio)).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn nuova_sessione(agente: String, cartella: String, testo: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || carteggio::nuova_sessione(&agente, &cartella, &testo)).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+fn debriefing(giorni: Option<i64>) -> serde_json::Value {
+    carteggio::debriefing(giorni.unwrap_or(7))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let home = dirs::home_dir().expect("cartella home non trovata");
@@ -76,7 +123,7 @@ pub fn run() {
             });
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![sessioni, apri_sessione])
+        .invoke_handler(tauri::generate_handler![sessioni, apri_sessione, giudica_prompt, riscrivi_prompt, invia_prompt, nuova_sessione, debriefing])
         .run(tauri::generate_context!())
         .expect("errore all'avvio di Crew Deck");
 }

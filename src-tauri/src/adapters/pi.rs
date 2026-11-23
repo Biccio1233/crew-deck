@@ -66,7 +66,10 @@ pub fn feed(acc: &mut Acc, riga: &Value) {
                                     ultimo = Ev::Strumento;
                                 }
                                 Some("thinking") => ultimo = Ev::Pensa,
-                                Some("text") => ultimo = Ev::Testo,
+                                Some("text") => {
+                                    ultimo = Ev::Testo;
+                                    acc.testo_agente(p.get("text").and_then(|v| v.as_str()).unwrap_or(""));
+                                }
                                 _ => {}
                             }
                         }

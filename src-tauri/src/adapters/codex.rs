@@ -49,6 +49,10 @@ pub fn feed(acc: &mut Acc, riga: &Value) {
                 }
             }
         }
+        ("event_msg", "agent_message") => {
+            acc.testo_agente(p.get("message").and_then(|v| v.as_str()).unwrap_or(""));
+            acc.tocca(ts);
+        }
         ("event_msg", "task_complete") => acc.fine_turno(ts),
         ("event_msg", "turn_aborted") => {
             acc.aperti.clear();

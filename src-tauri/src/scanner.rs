@@ -100,6 +100,12 @@ impl Scanner {
         self.localizzato = Some(Instant::now());
     }
 
+    /// Contesto per il carteggio: posizione, ultimo messaggio dell'agente, cartella.
+    pub fn contesto(&self, agente: Agente, id: &str) -> Option<(Option<Posizione>, Option<String>, Option<String>)> {
+        let l = self.lettori.values().find(|l| l.acc.agente == agente && l.acc.id == id)?;
+        Some((self.posizioni.get(&chiave(agente, id)).cloned(), l.acc.ultimo_testo.clone(), l.acc.cwd.clone()))
+    }
+
     /// Dati per le azioni: posizione, file, cartella, ultima app.
     pub fn per_azione(&self, agente: Agente, id: &str) -> Option<(Option<Posizione>, String, Option<String>, Option<String>, Option<String>)> {
         let k = chiave(agente, id);

@@ -220,6 +220,15 @@ if __name__ == "__main__":
     prima = None
     if "--prima" in a:
         i = a.index("--prima"); prima = a[i + 1]; del a[i:i + 2]
+    if a[0] == "--json":
+        # per Crew Deck: una riga JSON, errori compresi, mai eccezioni
+        try:
+            print(json.dumps(valuta(chiedi(a[1], prima)), ensure_ascii=False))
+        except PermissionError:
+            print(json.dumps({"saltato": "sensibile"}))
+        except Exception as e:
+            print(json.dumps({"errore": str(e)[:300]}))
+        sys.exit(0)
     if a[0] == "--payload":
         print(json.dumps(corpo(a[1], prima), ensure_ascii=False, indent=2))
         sys.exit(0)

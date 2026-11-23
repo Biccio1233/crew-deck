@@ -3,6 +3,8 @@
   import { listen } from "@tauri-apps/api/event";
   import { onMount } from "svelte";
   import Icona from "$lib/Icona.svelte";
+  import Carteggio from "$lib/Carteggio.svelte";
+  import Debriefing from "$lib/Debriefing.svelte";
 
   type Stato = "aspetta" | "lavora" | "finito" | "inattivo";
   type Vista = {
@@ -29,6 +31,9 @@
   const AGENTI: Record<string, string> = { claude: "Claude Code", codex: "Codex", pi: "pi" };
 
   let sessioni = $state<Vista[]>([]);
+  let vista = $state<"plancia" | "carteggio" | "debriefing">("plancia");
+  let destinazione = $state<string | null>(null);
+  function scriviA(s: Vista) { destinazione = `${s.agente}:${s.id}`; vista = "carteggio"; }
   let filtro = $state<Stato | "attivi">("attivi");
   let automatiche = $state(false);
   let aperta = $state<string | null>(null);
@@ -115,6 +120,13 @@
       <span class="nome">Crew Deck</span>
     </div>
 
+    <nav class="sezioni" aria-label="Sezioni">
+      <button aria-current={vista === "plancia"} onclick={() => (vista = "plancia")}>Plancia{#if conta.aspetta}<span class="pallino" title="Qualcuno ti aspetta"></span>{/if}</button>
+      <button aria-current={vista === "carteggio"} onclick={() => (vista = "carteggio")}>Carteggio</button>
+      <button aria-current={vista === "debriefing"} onclick={() => (vista = "debriefing")}>Debriefing</button>
+    </nav>
+
+    {#if vista === "plancia"}
     <div class="filtri" role="tablist" aria-label="Filtra per stato">
       <button role="tab" aria-selected={filtro === "attivi"} onclick={() => (filtro = "attivi")}>
         Attivi <span class="n">{conta.aspetta + conta.lavora + conta.finito}</span>
@@ -126,13 +138,22 @@
       {/each}
     </div>
 
+    {/if}
+
     <div class="destra">
       <span class="costo" title="Costo noto nelle ultime 24 ore">oggi <strong>${costoOggi.toFixed(2)}</strong></span>
+      {#if vista === "plancia"}
       <button class="interruttore" aria-pressed={automatiche} onclick={() => (automatiche = !automatiche)}
         title="Sessioni avviate da altri programmi (graphify, Floorplan, script)">Automatiche</button>
+      {/if}
     </div>
   </header>
 
+  {#if vista === "carteggio"}
+    <Carteggio sessioni={umane} bind:destinazione />
+  {:else if vista === "debriefing"}
+    <Debriefing />
+  {:else}
   <main>
     {#if !caricato}
       <div class="scheletro">{#each [1, 2, 3] as _}<div class="riga-s"></div>{/each}</div>
@@ -192,6 +213,7 @@
                   <div><dt>Origine</dt><dd>{s.origine ?? AGENTI[s.agente]}{s.automatica ? " · automatica" : ""}</dd></div>
                   <div><dt>Dove gira</dt><dd>{s.posizione ? `${nomeApp(s.posizione.app)}${s.posizione.tty ? " · " + s.posizione.tty.replace("/dev/", "") : ""}${s.posizione.incerta ? " · collegamento stimato" : ""}` : s.ultima_app ? `chiusa (ultima volta in ${nomeApp(s.ultima_app)})` : "chiusa"}</dd></div>
                   <div><dt>Sessione</dt><dd class="mono">{s.id}</dd></div>
+                  {#if s.posizione}<div><dt>Prossima richiesta</dt><dd><button class="link" onclick={() => scriviA(s)}>Scrivi a questa sessione →</button></dd></div>{/if}
                 </dl>
               {/if}
             </li>
@@ -205,6 +227,7 @@
       </section>
     {/each}
   </main>
+  {/if}
 
   {#if esito}
     <div class="esito" class:errore={esito.errore} role="status">{esito.testo}</div>
@@ -273,6 +296,16 @@
   .barca.naviga { animation: beccheggio 3s ease-in-out infinite; transform-origin: 14px 20px; }
   @keyframes beccheggio { 0%, 100% { transform: rotate(-2.5deg); } 50% { transform: rotate(2.5deg); } }
 
+  .sezioni { display: flex; gap: 2px; }
+  .sezioni button {
+    border: 0; background: transparent; color: var(--testo-2); padding: 6px 10px; border-radius: 6px; cursor: pointer;
+    position: relative; transition: color 150ms, background 150ms;
+  }
+  .sezioni button:hover { color: var(--testo); }
+  .sezioni button[aria-current="true"] { color: var(--testo); background: var(--riga-hover); }
+  .pallino { position: absolute; top: 5px; right: 3px; width: 6px; height: 6px; border-radius: 50%; background: var(--c-aspetta); }
+  .link { border: 0; background: transparent; color: var(--c-lavora); padding: 0; cursor: pointer; font: inherit; }
+  .link:hover { text-decoration: underline; }
   .filtri { display: flex; gap: 2px; padding: 3px; background: var(--bg); border: 1px solid var(--bordo); border-radius: 9px; }
   .filtri button {
     border: 0; background: transparent; padding: 4px 10px; border-radius: 6px; cursor: pointer;
