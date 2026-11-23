@@ -137,5 +137,5 @@ fn testo_utente(acc: &mut Acc, s: &str, ts: i64) {
         acc.tocca(ts);
         return;
     }
-    acc.prompt(corto(s, 300), ts);
+    acc.prompt(corto(s, 1200), ts);
 }

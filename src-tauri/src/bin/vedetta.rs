@@ -13,6 +13,12 @@ fn main() {
     let tutte = std::env::args().any(|a| a == "--tutte");
     let viste: Vec<_> = s.viste(ora_ms()).into_iter().filter(|v| tutte || !v.automatica).collect();
     let args: Vec<String> = std::env::args().collect();
+    if let Some(i) = args.iter().position(|a| a == "--suggerisci") {
+        let ag = match args[i + 1].as_str() { "claude" => crew_deck_lib::model::Agente::Claude, "codex" => crew_deck_lib::model::Agente::Codex, _ => crew_deck_lib::model::Agente::Pi };
+        let (rq, rs) = s.conversazione(ag, &args[i + 2]).expect("sessione");
+        println!("{}", serde_json::to_string_pretty(&crew_deck_lib::carteggio::suggerisci(rq.as_deref(), rs.as_deref().unwrap_or("")).unwrap_or_else(|e| serde_json::json!({"errore": e}))).unwrap());
+        return;
+    }
     if let Some(i) = args.iter().position(|a| a == "--riscrivi") {
         // prova: --riscrivi <rifinisci|approfondisci> "testo"
         println!("{}", serde_json::to_string_pretty(&crew_deck_lib::carteggio::riscrivi(&args[i + 1], &args[i + 2], None, &[]).unwrap_or_else(|e| serde_json::json!({"errore": e}))).unwrap());

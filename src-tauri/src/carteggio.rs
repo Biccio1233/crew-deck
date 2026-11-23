@@ -81,6 +81,30 @@ pub fn riscrivi(modo: &str, testo: &str, prima: Option<&str>, mancanti: &[String
     estrai_json(&out).ok_or_else(|| format!("risposta non in JSON: {}", out.chars().take(200).collect::<String>()))
 }
 
+const SUGGERISCI: &str = r#"Sei l'assistente di chi dirige un agente AI (Claude Code, Codex, pi). Qui sotto ci sono l'ultima richiesta dell'utente e l'ultima risposta dell'agente.
+Proponi da 2 a 3 risposte che l'utente potrebbe mandare adesso per far avanzare bene il lavoro. Regole:
+- se l'agente ha fatto domande, almeno una proposta risponde a quelle domande, con segnaposti [[...]] dove serve una scelta che solo l'utente può fare;
+- se l'agente dice di aver finito, una proposta chiede una verifica concreta (un test, un controllo, un esempio da vedere) prima di andare avanti;
+- scrivi come scrive l'utente: italiano diretto, frasi brevi, niente formule di cortesia;
+- non inventare fatti sul progetto.
+Rispondi SOLO con un oggetto JSON, senza testo prima o dopo:
+{"suggerimenti": [{"testo": "la risposta da mandare", "perche": "a cosa serve, in poche parole"}]}"#;
+
+/// Propone cosa rispondere all'agente, dalla coppia ultima richiesta / ultima risposta.
+pub fn suggerisci(richiesta: Option<&str>, risposta: &str) -> Result<Value, String> {
+    let coda: String = risposta.chars().rev().take(2500).collect::<String>().chars().rev().collect();
+    let testo = format!(
+        "{SUGGERISCI}\n\n<ultima_richiesta_utente>\n{}\n</ultima_richiesta_utente>\n\n<ultima_risposta_agente>\n{coda}\n</ultima_risposta_agente>\n",
+        richiesta.unwrap_or("(nessuna)")
+    );
+    let mut cmd = Command::new("claude");
+    cmd.args(["-p", "--tools", "", "--no-session-persistence", "--setting-sources", "", "--output-format", "text", "--model", "sonnet"])
+        .env("CREWDECK_GIUDICE", "0")
+        .current_dir(std::env::temp_dir());
+    let out = con_tempo(cmd, Some(&testo), 120)?;
+    estrai_json(&out).ok_or_else(|| format!("risposta non in JSON: {}", out.chars().take(200).collect::<String>()))
+}
+
 /// Prende il primo oggetto JSON da un testo (il modello a volte aggiunge recinti ```json).
 pub fn estrai_json(t: &str) -> Option<Value> {
     let i = t.find('{')?;

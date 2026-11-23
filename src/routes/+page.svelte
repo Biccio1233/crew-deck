@@ -14,7 +14,7 @@
     automatica: boolean; origine: string | null;
     token: { input: number; output: number; cache_lettura: number; cache_scrittura: number };
     stato: Stato; motivo: string; stimato: boolean; da_quando: number; azione: string;
-    file: string; ultima_app: string | null;
+    file: string; ultima_app: string | null; ultima_risposta: string | null;
     posizione: { app: string; pid: number; tty: string | null; cmux_surface: string | null; incerta: boolean } | null;
   };
 
@@ -205,7 +205,8 @@
               {#if aperta === chiave(s)}
                 <dl class="dettagli">
                   <div><dt>Cartella</dt><dd class="mono">{s.cartella ?? "sconosciuta"}</dd></div>
-                  <div><dt>Ultima richiesta</dt><dd>{s.richiesta ?? "nessuna"}</dd></div>
+                  <div class="largo"><dt>Ultima richiesta</dt><dd class="clamp">{s.richiesta ?? "nessuna"}</dd></div>
+                  {#if s.ultima_risposta}<div class="largo"><dt>Ultima risposta</dt><dd class="clamp">{s.ultima_risposta.replace(/\*\*(.+?)\*\*/g, "$1").replace(/`([^`]+)`/g, "$1")}</dd></div>{/if}
                   <div><dt>Modello</dt><dd>{s.modello ?? "?"}</dd></div>
                   <div><dt>Richieste</dt><dd>{s.n_richieste}</dd></div>
                   <div><dt>Token</dt><dd class="mono">in {s.token.input} · out {s.token.output} · cache {s.token.cache_lettura}/{s.token.cache_scrittura}</dd></div>
@@ -409,6 +410,8 @@
     gap: 8px 24px; animation: apri 200ms cubic-bezier(0.22, 1, 0.36, 1);
   }
   .dettagli div { min-width: 0; }
+  .dettagli .largo { grid-column: 1 / -1; }
+  .dettagli .clamp { white-space: pre-wrap; display: -webkit-box; -webkit-line-clamp: 4; line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
   .dettagli dt { font-size: 11px; color: var(--testo-3); text-transform: uppercase; letter-spacing: 0.05em; }
   .dettagli dd { margin: 2px 0 0; color: var(--testo-2); overflow-wrap: anywhere; }
   .dettagli .mono { font-family: var(--mono); font-size: 12px; }

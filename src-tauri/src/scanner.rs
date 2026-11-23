@@ -22,6 +22,8 @@ pub struct Vista {
     pub titolo: Option<String>,
     pub modello: Option<String>,
     pub richiesta: Option<String>,
+    /// Coda dell'ultimo messaggio dell'agente (solo locale, per il carteggio).
+    pub ultima_risposta: Option<String>,
     pub n_richieste: u32,
     pub inizio: Option<i64>,
     pub ultima_attivita: i64,
@@ -100,6 +102,12 @@ impl Scanner {
         self.localizzato = Some(Instant::now());
     }
 
+    /// Ultima richiesta e ultima risposta di una sessione.
+    pub fn conversazione(&self, agente: Agente, id: &str) -> Option<(Option<String>, Option<String>)> {
+        let l = self.lettori.values().find(|l| l.acc.agente == agente && l.acc.id == id)?;
+        Some((l.acc.ultimo_prompt.clone(), l.acc.ultimo_testo.clone()))
+    }
+
     /// Contesto per il carteggio: posizione, ultimo messaggio dell'agente, cartella.
     pub fn contesto(&self, agente: Agente, id: &str) -> Option<(Option<Posizione>, Option<String>, Option<String>)> {
         let l = self.lettori.values().find(|l| l.acc.agente == agente && l.acc.id == id)?;
@@ -133,6 +141,7 @@ impl Scanner {
                     titolo: a.titolo.clone(),
                     modello: a.modello.clone(),
                     richiesta: a.ultimo_prompt.clone(),
+                    ultima_risposta: if a.automatica { None } else { a.ultimo_testo.clone() },
                     n_richieste: a.n_prompt,
                     inizio: a.inizio,
                     ultima_attivita: a.ultima_attivita,

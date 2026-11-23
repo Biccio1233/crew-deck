@@ -92,6 +92,18 @@ async fn invia_prompt(plancia: tauri::State<'_, Plancia>, agente: String, id: St
     tauri::async_runtime::spawn_blocking(move || carteggio::invia(&pos, &testo, invio)).await.map_err(|e| e.to_string())?
 }
 
+/// Suggerisce cosa rispondere alla sessione scelta.
+#[tauri::command]
+async fn suggerisci_risposta(plancia: tauri::State<'_, Plancia>, agente: String, id: String) -> Result<serde_json::Value, String> {
+    let ag = agente_da(&agente)?;
+    let (richiesta, risposta) = {
+        let s = plancia.0.lock().unwrap();
+        s.conversazione(ag, &id).ok_or("sessione non trovata")?
+    };
+    let risposta = risposta.ok_or("l'agente non ha ancora risposto")?;
+    tauri::async_runtime::spawn_blocking(move || carteggio::suggerisci(richiesta.as_deref(), &risposta)).await.map_err(|e| e.to_string())?
+}
+
 #[tauri::command]
 async fn nuova_sessione(agente: String, cartella: String, testo: String) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || carteggio::nuova_sessione(&agente, &cartella, &testo)).await.map_err(|e| e.to_string())?
@@ -123,7 +135,7 @@ pub fn run() {
             });
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![sessioni, apri_sessione, giudica_prompt, riscrivi_prompt, invia_prompt, nuova_sessione, debriefing])
+        .invoke_handler(tauri::generate_handler![sessioni, apri_sessione, giudica_prompt, riscrivi_prompt, suggerisci_risposta, invia_prompt, nuova_sessione, debriefing])
         .run(tauri::generate_context!())
         .expect("errore all'avvio di Crew Deck");
 }

@@ -4,7 +4,8 @@
 
   type Sessione = {
     id: string; agente: "claude" | "codex" | "pi"; progetto: string; cartella: string | null; titolo: string | null;
-    stato: string; posizione: { app: string } | null;
+    stato: string; azione: string; posizione: { app: string } | null;
+    richiesta: string | null; ultima_risposta: string | null;
   };
   type Punto = { p: number | null; esito: "si" | "no" | "incerto" };
   type Giudizio = { tipo?: string; compito?: boolean; punti?: Record<string, Punto>; saltato?: string; errore?: string };
@@ -40,11 +41,45 @@
   let agenteNuovo = $state<"claude" | "codex" | "pi">("claude");
   let cartellaNuova = $state("");
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let tuttaRisposta = $state(false);
+  let suggerimenti = $state<{ testo: string; perche: string }[] | null>(null);
+  let suggerendo = $state(false);
   let ultimoGiudicato = "";
 
   const aperte = $derived(sessioni.filter((s) => s.posizione && !s.id.startsWith("_")));
   const cartelle = $derived([...new Set(sessioni.map((s) => s.cartella).filter((c): c is string => !!c))].slice(0, 30));
   const scelta = $derived(destinazione && destinazione !== "nuova" ? sessioni.find((s) => `${s.agente}:${s.id}` === destinazione) ?? null : null);
+  // Domande che l'agente ha fatto nell'ultima risposta: le frasi che finiscono con «?».
+  const domandeAgente = $derived.by(() => {
+    const t = (scelta?.ultima_risposta ?? "").slice(-2500);
+    const pezzi = t.split(/\n+|(?<=[.!?])\s+(?=[A-ZÀ-Ý«*])/);
+    const viste = new Set<string>();
+    return pezzi
+      .map((x) => x.replace(/\*\*/g, "").replace(/^\s*([-•]|\d+[.)])\s*/, "").trim())
+      .filter((x) => x.endsWith("?") && x.length >= 8 && x.length <= 240 && !viste.has(x) && viste.add(x))
+      .slice(-4);
+  });
+  // Testo leggibile: via i segni della formattazione Markdown più comuni.
+  const leggibile = (t: string) => t.replace(/\*\*(.+?)\*\*/g, "$1").replace(/`([^`]+)`/g, "$1").replace(/^#{1,6}\s+/gm, "");
+  const STATI: Record<string, string> = { aspetta: "Ti aspetta", lavora: "Sta lavorando", finito: "Ha finito", inattivo: "In porto" };
+  function rispondiA(d: string) {
+    const breve = d.length > 90 ? d.slice(0, 87) + "…" : d;
+    testo = (testo.trim() ? testo.trimEnd() + "\n" : "") + `Su «${breve}»: `;
+    programma();
+  }
+  async function suggerisci() {
+    if (!scelta) return;
+    suggerendo = true; suggerimenti = null;
+    try {
+      const r = await invoke<{ suggerimenti: { testo: string; perche: string }[] }>("suggerisci_risposta", { agente: scelta.agente, id: scelta.id });
+      suggerimenti = r.suggerimenti ?? [];
+    } catch (e) {
+      mostra(String(e), true);
+    } finally {
+      suggerendo = false;
+    }
+  }
+  function usaSuggerimento(t: string) { testo = t; suggerimenti = null; programma(); }
   const parole = $derived(testo.trim() ? testo.trim().split(/\s+/).length : 0);
   const segnaposti = $derived((testo.match(/\[\[[^\]]+\]\]/g) ?? []).length);
   const avvisi = $derived(
@@ -122,7 +157,7 @@
   <section class="scrittura">
     <div class="riga-dest">
       <label for="dest">A chi</label>
-      <select id="dest" bind:value={destinazione} onchange={() => { ultimoGiudicato = ""; programma(); }}>
+      <select id="dest" bind:value={destinazione} onchange={() => { ultimoGiudicato = ""; suggerimenti = null; tuttaRisposta = false; programma(); }}>
         {#if aperte.length}
           <optgroup label="Sessioni aperte">
             {#each aperte as s}
@@ -140,7 +175,47 @@
       {/if}
     </div>
 
-    <textarea bind:value={testo} oninput={programma} placeholder="Scrivi la richiesta. Il controllo parte mentre scrivi." rows="12" spellcheck="true"></textarea>
+    {#if scelta}
+      <div class="conversazione">
+        <div class="conv-testa">
+          <h3>Dove eravate rimasti</h3>
+          <span class="conv-stato {scelta.stato}">{STATI[scelta.stato] ?? scelta.stato}{scelta.stato === "lavora" || scelta.stato === "aspetta" ? ` · ${scelta.azione}` : ""}</span>
+        </div>
+        {#if scelta.richiesta}
+          <div class="battuta tu"><span class="chi">Tu</span><p class="taglia3">{leggibile(scelta.richiesta)}</p></div>
+        {/if}
+        {#if scelta.ultima_risposta}
+          <div class="battuta agente">
+            <span class="chi">{scelta.agente === "claude" ? "Claude" : scelta.agente === "codex" ? "Codex" : "pi"}</span>
+            <p class:taglia={!tuttaRisposta}>{leggibile(scelta.ultima_risposta)}</p>
+            {#if scelta.ultima_risposta.length > 500}
+              <button class="link" onclick={() => (tuttaRisposta = !tuttaRisposta)}>{tuttaRisposta ? "Mostra meno" : "Mostra tutta la risposta"}</button>
+            {/if}
+          </div>
+        {:else}
+          <p class="vuoto">L'agente non ha ancora risposto.</p>
+        {/if}
+        {#if domandeAgente.length}
+          <div class="domande-ag">
+            <span class="chi">Ti ha chiesto</span>
+            <ul>{#each domandeAgente as d}<li><button class="dom" onclick={() => rispondiA(d)} title="Prepara una risposta a questa domanda">{d}</button></li>{/each}</ul>
+          </div>
+        {/if}
+        <div class="sugg-riga">
+          <button class="sec" onclick={suggerisci} disabled={suggerendo || !scelta.ultima_risposta}>{suggerendo ? "Penso a cosa rispondere…" : "Cosa rispondere?"}</button>
+          <span class="nota-t">Claude propone 2–3 risposte possibili, tu scegli e modifichi.</span>
+        </div>
+        {#if suggerimenti}
+          <ul class="suggerimenti">
+            {#each suggerimenti as sg}
+              <li><button onclick={() => usaSuggerimento(sg.testo)}><span class="s-testo">{sg.testo}</span><span class="s-perche">{sg.perche}</span></button></li>
+            {/each}
+          </ul>
+        {/if}
+      </div>
+    {/if}
+
+    <textarea bind:value={testo} oninput={programma} placeholder="Scrivi la richiesta. Il controllo parte mentre scrivi." rows="7" spellcheck="true"></textarea>
 
     <div class="azioni">
       <button class="sec" disabled={!testo.trim() || riscrivendo} onclick={() => riscrivi("rifinisci")} title="Modifiche minime: aggiunge solo ciò che manca">
@@ -257,7 +332,7 @@
   }
   select { padding: 5px 8px; max-width: 100%; }
   select.cartella { max-width: 320px; }
-  textarea { padding: 12px 14px; line-height: 1.55; resize: vertical; min-height: 200px; font-size: 14px; }
+  textarea { padding: 12px 14px; line-height: 1.55; resize: vertical; min-height: 140px; font-size: 14px; }
   textarea:focus, input:focus, select:focus { outline: 2px solid var(--c-lavora); outline-offset: -1px; }
   .azioni { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
   .spazio { flex: 1; }
@@ -274,6 +349,33 @@
   .conferma div { display: flex; gap: 8px; }
   .mono { font-family: var(--mono); font-size: 12px; }
 
+  .conversazione { border: 1px solid var(--bordo); border-radius: 8px; padding: 12px 14px; display: grid; gap: 10px; background: var(--pannello); }
+  .conv-testa { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+  .conv-testa h3 { margin: 0; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--testo-3); }
+  .conv-stato { font-size: 12px; color: var(--testo-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 60%; }
+  .conv-stato.aspetta { color: var(--c-aspetta); }
+  .conv-stato.lavora { color: var(--c-lavora); }
+  .battuta { display: grid; grid-template-columns: 56px minmax(0, 1fr); gap: 2px 10px; }
+  .battuta p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5; }
+  .battuta.tu p { color: var(--testo); }
+  .battuta.agente p { color: var(--testo-2); }
+  .battuta .link { grid-column: 2; justify-self: start; }
+  .chi { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--testo-3); padding-top: 2px; }
+  .taglia3 { display: -webkit-box; -webkit-line-clamp: 3; line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+  .taglia { display: -webkit-box; -webkit-line-clamp: 8; line-clamp: 8; -webkit-box-orient: vertical; overflow: hidden; }
+  .link { border: 0; background: transparent; color: var(--c-lavora); padding: 0; cursor: pointer; font: inherit; font-size: 12px; }
+  .link:hover { text-decoration: underline; }
+  .domande-ag { display: grid; grid-template-columns: 56px minmax(0, 1fr); gap: 2px 10px; }
+  .domande-ag ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+  .dom { text-align: left; border: 1px solid var(--bordo); background: var(--bg); color: var(--testo); border-radius: 6px; padding: 5px 9px; cursor: pointer; font: inherit; font-size: 12.5px; transition: border-color 150ms; }
+  .dom:hover { border-color: var(--c-lavora); }
+  .sugg-riga { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .nota-t { color: var(--testo-3); font-size: 12px; }
+  .suggerimenti { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+  .suggerimenti button { width: 100%; text-align: left; display: grid; gap: 3px; border: 1px solid var(--bordo); background: var(--bg); border-radius: 8px; padding: 9px 12px; cursor: pointer; font: inherit; color: var(--testo); transition: border-color 150ms; }
+  .suggerimenti button:hover { border-color: var(--c-lavora); }
+  .s-testo { white-space: pre-wrap; }
+  .s-perche { color: var(--testo-3); font-size: 12px; }
   .proposta { border-top: 1px solid var(--bordo); padding-top: 14px; animation: apri 200ms cubic-bezier(0.22, 1, 0.36, 1); }
   .proposta h3 { margin: 0 0 8px; font-size: 13px; }
   .proposta h4 { margin: 12px 0 4px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--testo-3); }

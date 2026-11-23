@@ -31,7 +31,7 @@ pub fn feed(acc: &mut Acc, riga: &Value) {
                 Some("user") => {
                     let t = testo(&m);
                     if !t.trim().is_empty() {
-                        acc.prompt(corto(&t, 300), ts);
+                        acc.prompt(corto(&t, 1200), ts);
                         if acc.titolo.is_none() {
                             acc.titolo = Some(corto(&t, 60));
                         }

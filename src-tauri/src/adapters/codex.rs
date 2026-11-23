@@ -43,7 +43,7 @@ pub fn feed(acc: &mut Acc, riga: &Value) {
         ("event_msg", "user_message") => {
             let t = p.get("message").and_then(|v| v.as_str()).unwrap_or("");
             if !t.trim().is_empty() {
-                acc.prompt(corto(t, 300), ts);
+                acc.prompt(corto(t, 1200), ts);
                 if acc.titolo.is_none() {
                     acc.titolo = Some(corto(t, 60));
                 }
