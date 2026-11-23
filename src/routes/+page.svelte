@@ -14,7 +14,7 @@
     automatica: boolean; origine: string | null;
     token: { input: number; output: number; cache_lettura: number; cache_scrittura: number };
     stato: Stato; motivo: string; stimato: boolean; da_quando: number; azione: string;
-    file: string; ultima_app: string | null; ultima_risposta: string | null;
+    file: string; ultima_app: string | null; ultima_risposta: string | null; chiusa: boolean;
     posizione: { app: string; pid: number; tty: string | null; cmux_surface: string | null; incerta: boolean } | null;
   };
 
@@ -43,7 +43,9 @@
   const LIMITE = 5;
   const compatta = (st: Stato) => st === "finito" || st === "inattivo";
 
-  const umane = $derived(sessioni.filter((s) => automatiche || !s.automatica));
+  let mostraChiuse = $state(false);
+  const umane = $derived(sessioni.filter((s) => (automatiche || !s.automatica) && !s.chiusa));
+  const chiuse = $derived(sessioni.filter((s) => s.chiusa && (automatiche || !s.automatica)));
   const conta = $derived(
     Object.fromEntries(SEZIONI.map(({ stato }) => [stato, umane.filter((s) => s.stato === stato).length])) as Record<Stato, number>
   );
@@ -77,9 +79,25 @@
   const etichettaAzione = (s: Vista) =>
     appDesktop(s) ? `Apri nell'${appDesktop(s)}` : s.posizione ? `Apri in ${nomeApp(s.posizione.app)}` : "Riprendi";
 
-  let esito = $state<{ testo: string; errore: boolean } | null>(null);
+  let esito = $state<{ testo: string; errore: boolean; annulla?: () => void } | null>(null);
   let inCorso = $state<string | null>(null);
   let timerEsito: ReturnType<typeof setTimeout> | undefined;
+
+  // Chiudere toglie la riga dalla vista: i file della sessione restano e la si può sempre riprendere.
+  async function chiudi(s: Vista, ripristina = false) {
+    try {
+      await invoke("chiudi_sessione", { agente: s.agente, id: s.id, ripristina });
+      sessioni = sessioni.map((x) => (chiave(x) === chiave(s) ? { ...x, chiusa: !ripristina } : x));
+      if (aperta === chiave(s)) aperta = null;
+      esito = ripristina
+        ? { testo: `${s.progetto}: di nuovo nella Plancia`, errore: false }
+        : { testo: `${s.progetto}: sessione chiusa`, errore: false, annulla: () => chiudi(s, true) };
+    } catch (e) {
+      esito = { testo: String(e), errore: true };
+    }
+    clearTimeout(timerEsito);
+    timerEsito = setTimeout(() => (esito = null), 6000);
+  }
 
   async function apri(s: Vista) {
     inCorso = chiave(s);
@@ -126,19 +144,6 @@
       <button aria-current={vista === "debriefing"} onclick={() => (vista = "debriefing")}>Debriefing</button>
     </nav>
 
-    {#if vista === "plancia"}
-    <div class="filtri" role="tablist" aria-label="Filtra per stato">
-      <button role="tab" aria-selected={filtro === "attivi"} onclick={() => (filtro = "attivi")}>
-        Attivi <span class="n">{conta.aspetta + conta.lavora + conta.finito}</span>
-      </button>
-      {#each SEZIONI as sez}
-        <button role="tab" class={sez.stato} aria-selected={filtro === sez.stato} onclick={() => (filtro = sez.stato)}>
-          {sez.filtro} <span class="n">{conta[sez.stato]}</span>
-        </button>
-      {/each}
-    </div>
-
-    {/if}
 
     <div class="destra">
       <span class="costo" title="Costo noto nelle ultime 24 ore">oggi <strong>${costoOggi.toFixed(2)}</strong></span>
@@ -155,6 +160,19 @@
     <Debriefing />
   {:else}
   <main>
+    <div class="sottobarra">
+    <div class="filtri" role="tablist" aria-label="Filtra per stato">
+      <button role="tab" aria-selected={filtro === "attivi"} onclick={() => (filtro = "attivi")}>
+        Attivi <span class="n">{conta.aspetta + conta.lavora + conta.finito}</span>
+      </button>
+      {#each SEZIONI as sez}
+        <button role="tab" class={sez.stato} aria-selected={filtro === sez.stato} onclick={() => (filtro = sez.stato)}>
+          {sez.filtro} <span class="n">{conta[sez.stato]}</span>
+        </button>
+      {/each}
+    </div>
+
+    </div>
     {#if !caricato}
       <div class="scheletro">{#each [1, 2, 3] as _}<div class="riga-s"></div>{/each}</div>
     {:else if sezioni.length === 0}
@@ -202,6 +220,13 @@
                 {/if}
                 {inCorso === chiave(s) ? "…" : etichettaAzione(s)}
               </button>
+              {#if !s.posizione && s.stato !== "lavora" && s.stato !== "aspetta"}
+                <button class="chiudi" onclick={() => chiudi(s)} title="Chiudi: toglie la sessione dalla Plancia. I file restano e puoi sempre riprenderla." aria-label={`Chiudi la sessione ${s.progetto}`}>
+                  <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" /></svg>
+                </button>
+              {:else}
+                <span class="chiudi-vuoto"></span>
+              {/if}
               {#if aperta === chiave(s)}
                 <dl class="dettagli">
                   <div><dt>Cartella</dt><dd class="mono">{s.cartella ?? "sconosciuta"}</dd></div>
@@ -227,11 +252,39 @@
         {/if}
       </section>
     {/each}
+    {#if chiuse.length}
+      <section class="chiuse">
+        <button class="altri" onclick={() => (mostraChiuse = !mostraChiuse)}>
+          {mostraChiuse ? "Nascondi le sessioni chiuse" : `Mostra chiuse (${chiuse.length})`}
+        </button>
+        {#if mostraChiuse}
+          <ul>
+            {#each chiuse as s (chiave(s))}
+              <li class="riga-chiusa">
+                <span class="ico"><Icona stato="inattivo" /></span>
+                <span class="progetto">{s.progetto}</span>
+                {#if s.titolo}<span class="titolo">{s.titolo}</span>{/if}
+                <span class="spazio"></span>
+                <span class="tempo">{trascorso(s.ultima_attivita)}</span>
+                <span class="agente {s.agente}">{AGENTI[s.agente]}</span>
+                <button class="vai" onclick={() => chiudi(s, true)} title="Rimette la sessione nella Plancia">
+                  <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8a5 5 0 1 0 1.5-3.5M3 2.5V5h2.5" /></svg>
+                  Ripristina
+                </button>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+      </section>
+    {/if}
   </main>
   {/if}
 
   {#if esito}
-    <div class="esito" class:errore={esito.errore} role="status">{esito.testo}</div>
+    <div class="esito" class:errore={esito.errore} role="status">
+      {esito.testo}
+      {#if esito.annulla}<button class="annulla" onclick={() => { const f = esito?.annulla; esito = null; f?.(); }}>Annulla</button>{/if}
+    </div>
   {/if}
 </div>
 
@@ -338,7 +391,7 @@
   h2 span { font-variant-numeric: tabular-nums; }
   section.aspetta h2 { color: var(--c-aspetta); }
   ul { list-style: none; margin: 0; padding: 0; }
-  li { border-top: 1px solid var(--bordo); display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; }
+  li { border-top: 1px solid var(--bordo); display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: start; }
   li > .dettagli { grid-column: 1 / -1; }
   .vai {
     margin: 10px 16px 0 0; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
@@ -352,6 +405,24 @@
   section.aspetta .vai.viva:hover { background: var(--tinta-aspetta); }
   .vai:disabled { opacity: 0.45; cursor: default; }
   .dove { color: var(--testo-3); }
+  .chiudi, .chiudi-vuoto { width: 28px; height: 28px; margin: 10px 12px 0 -10px; }
+  li.compatta .chiudi, li.compatta .chiudi-vuoto { margin-top: 6px; }
+  .chiudi {
+    display: inline-flex; align-items: center; justify-content: center; border: 1px solid transparent; background: transparent;
+    color: var(--testo-3); border-radius: 6px; cursor: pointer; transition: background 150ms, color 150ms, border-color 150ms;
+  }
+  .chiudi svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; }
+  .chiudi:hover { color: var(--testo); background: var(--riga-hover); border-color: var(--bordo); }
+  li.riga-chiusa { display: flex; align-items: center; gap: 10px; padding: 6px 12px 6px 16px; }
+  li.riga-chiusa .ico { width: 28px; flex: none; }
+  li.riga-chiusa .titolo { min-width: 0; }
+  li.riga-chiusa .spazio { flex: 1; }
+  li.riga-chiusa .vai { margin: 0 34px 0 0; }
+  .sottobarra { padding: 10px 16px 0; display: flex; }
+  .filtri button { white-space: nowrap; }
+  section.chiuse { margin-top: 18px; }
+  section.chiuse ul { margin-top: 6px; opacity: 0.8; }
+  .annulla { margin-left: 12px; border: 0; background: transparent; color: var(--c-lavora); cursor: pointer; font: inherit; font-weight: 600; padding: 0; }
   /* righe compatte: chi ha finito o è in porto occupa una riga sola */
   li.compatta .riga { padding-top: 7px; padding-bottom: 7px; align-items: center; }
   li.compatta .principale { flex-direction: row; gap: 10px; align-items: baseline; }

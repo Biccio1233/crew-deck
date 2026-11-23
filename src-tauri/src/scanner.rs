@@ -33,6 +33,8 @@ pub struct Vista {
     pub errori: u32,
     pub origine: Option<String>,
     pub automatica: bool,
+    /// Chiusa dall'utente nella vista (i file restano; ricompare se torna attiva).
+    pub chiusa: bool,
     #[serde(flatten)]
     pub calcolo: Calcolo,
 }
@@ -43,6 +45,10 @@ pub struct Scanner {
     posizioni: HashMap<String, Posizione>,
     ultima_app: HashMap<String, String>,
     localizzato: Option<Instant>,
+    /// chiave → ultima attività al momento della chiusura (persistito in ~/.crew-deck/chiuse.json).
+    chiuse: HashMap<String, i64>,
+    /// Dove si salvano le chiuse; None nei test (niente scritture fuori).
+    file_chiuse: Option<PathBuf>,
     /// Si guardano solo i file toccati negli ultimi N giorni.
     finestra: Duration,
 }
@@ -59,12 +65,14 @@ impl Scanner {
             posizioni: HashMap::new(),
             ultima_app: HashMap::new(),
             localizzato: None,
+            chiuse: carica_chiuse(&home.join(".crew-deck/chiuse.json")),
+            file_chiuse: Some(home.join(".crew-deck/chiuse.json")),
             finestra: Duration::from_secs(3 * 24 * 3600),
         }
     }
 
     pub fn con_radici(radici: Vec<(Agente, PathBuf)>, finestra: Duration) -> Self {
-        Scanner { radici, lettori: HashMap::new(), posizioni: HashMap::new(), ultima_app: HashMap::new(), localizzato: None, finestra }
+        Scanner { radici, lettori: HashMap::new(), posizioni: HashMap::new(), ultima_app: HashMap::new(), localizzato: None, chiuse: HashMap::new(), file_chiuse: None, finestra }
     }
 
     /// Cerca file nuovi e legge le code dei file già noti.
@@ -100,6 +108,25 @@ impl Scanner {
             self.ultima_app.insert(k.clone(), p.app.clone());
         }
         self.localizzato = Some(Instant::now());
+    }
+
+    /// Toglie la sessione dalla vista. Non cancella nulla.
+    pub fn chiudi(&mut self, agente: Agente, id: &str) -> bool {
+        let Some(l) = self.lettori.values().find(|l| l.acc.agente == agente && l.acc.id == id) else { return false };
+        self.chiuse.insert(chiave(agente, id), l.acc.ultima_attivita);
+        salva_chiuse(self.file_chiuse.as_deref(), &self.chiuse);
+        true
+    }
+
+    /// Rimette la sessione nella vista.
+    pub fn ripristina(&mut self, agente: Agente, id: &str) {
+        self.chiuse.remove(&chiave(agente, id));
+        salva_chiuse(self.file_chiuse.as_deref(), &self.chiuse);
+    }
+
+    /// Una sessione chiusa resta chiusa finché non c'è attività nuova dopo la chiusura.
+    fn e_chiusa(&self, k: &str, ultima_attivita: i64) -> bool {
+        self.chiuse.get(k).map(|t| ultima_attivita <= *t).unwrap_or(false)
     }
 
     /// Ultima richiesta e ultima risposta di una sessione.
@@ -151,6 +178,7 @@ impl Scanner {
                     errori: a.errori,
                     origine: a.origine.clone(),
                     automatica: a.automatica,
+                    chiusa: self.e_chiusa(&k, a.ultima_attivita),
                     calcolo: calcola(a, ora, &o),
                 }
             })
@@ -187,4 +215,16 @@ pub fn progetto(cwd: &str) -> String {
 
 pub fn chiave(agente: Agente, id: &str) -> String {
     format!("{:?}:{}", agente, id).to_lowercase()
+}
+
+fn carica_chiuse(f: &Path) -> HashMap<String, i64> {
+    std::fs::read_to_string(f).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default()
+}
+
+fn salva_chiuse(f: Option<&Path>, m: &HashMap<String, i64>) {
+    let Some(f) = f else { return };
+    if let Some(d) = f.parent() {
+        let _ = std::fs::create_dir_all(d);
+    }
+    let _ = std::fs::write(f, serde_json::to_string_pretty(m).unwrap_or_default());
 }
