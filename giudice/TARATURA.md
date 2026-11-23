@@ -25,11 +25,24 @@ Latenza mediana 0,24 s (massima 0,66 s) per 7 domande in una richiesta. Circa 1.
 - «Dove» comprende progetto, documento e schermata, non solo file e cartelle.
 Cambiate le definizioni, non le parole per ottenere un numero. Il secondo giro è sullo stesso campione: i casi di controllo sono l'unica verifica fuori campione, e sono pochi.
 
-## Regola d'uso in Crew Deck
-Segnalare un punto mancante solo se Jev dice chiaramente no (p ≤ 0,3), e solo per: come si verifica, una richiesta alla volta, vincoli, perché. «Dove» e «contesto» si mostrano, ma non generano avvisi.
 
 ## Il dato che conta
 Fra i compiti veri del campione, **nessuno** diceva come verificare il risultato. È il primo consiglio da dare.
 
-## Da fare
-Rifare la taratura con 30 casi nuovi mai visti, prima di attivare l'hook su tutte le sessioni.
+## Verifica fuori campione (terzo giro, 30 prompt mai visti)
+28 valutabili: 2 erano messaggi di sistema (notifica di fine attività, comando `/mcp`) e vanno saltati prima di Jev.
+| Punto | Esito | Nota |
+|---|---|---|
+| Tipo | **21/23 (91%)** | confermato |
+| Come si verifica | 7 ok · 1 incerto · 0 errori | confermato |
+| Contesto | 5 ok · 1 «errore» · 1 incerto | sul caso in disaccordo aveva ragione Jev (una preferenza dell'utente è contesto) |
+| Vincoli | 6 ok · 1 «errore» · 1 incerto | il disaccordo è difendibile |
+| Perché serve | 6 ok · 3 incerti | solo informazione |
+| Una richiesta alla volta | 2 ok · 1 no · 6 incerti | **non regge fuori campione**: solo informazione |
+| Dove intervenire | 4 ok · 3 no · 2 incerti | debole: solo informazione |
+
+## Regola d'uso definitiva (v1)
+- Prima il tipo: i punti valgono solo per `new_task`.
+- **Avvisi** solo per «come si verifica» e «vincoli», quando Jev dice chiaramente no (p ≤ 0,3).
+- «Contesto» e «perché» si mostrano come informazione; «dove» e «una richiesta alla volta» si registrano ma non si mostrano finché una nuova taratura non li rende affidabili.
+- Saltati prima di Jev: messaggi che iniziano con `<` (sistema), prompt di 3 parole o meno, argomenti sensibili.
