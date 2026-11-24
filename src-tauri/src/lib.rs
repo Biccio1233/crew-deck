@@ -134,8 +134,28 @@ fn debriefing(giorni: Option<i64>) -> serde_json::Value {
     carteggio::debriefing(giorni.unwrap_or(7))
 }
 
+/// Le app aperte dal Finder ricevono un PATH ridotto (/usr/bin:/bin…): senza questo non trovano
+/// cmux, claude, codex installati con Homebrew o in ~/.local/bin. Si prende il PATH della shell di
+/// login dell'utente e si aggiungono le cartelle comuni.
+pub fn completa_path() {
+    let home = dirs::home_dir().unwrap_or_default();
+    let mut parti: Vec<String> = std::env::var("PATH").unwrap_or_default().split(':').filter(|s| !s.is_empty()).map(String::from).collect();
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
+    if let Ok(out) = std::process::Command::new(&shell).args(["-lc", "printf %s \"$PATH\""]).output() {
+        for p in String::from_utf8_lossy(&out.stdout).split(':') {
+            if !p.is_empty() && !parti.iter().any(|x| x == p) { parti.push(p.to_string()); }
+        }
+    }
+    for p in ["/opt/homebrew/bin", "/usr/local/bin", &format!("{}/.local/bin", home.display()), &format!("{}/.cargo/bin", home.display()), "/Applications/cmux.app/Contents/Resources/bin"] {
+        if !parti.iter().any(|x| x == p) { parti.push(p.to_string()); }
+    }
+    // SAFETY: chiamata all'avvio, prima che l'app crei altri thread che leggono l'ambiente.
+    unsafe { std::env::set_var("PATH", parti.join(":")) };
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    completa_path();
     let home = dirs::home_dir().expect("cartella home non trovata");
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())

@@ -179,7 +179,17 @@ impl Scanner {
                     origine: a.origine.clone(),
                     automatica: a.automatica,
                     chiusa: self.e_chiusa(&k, a.ultima_attivita),
-                    calcolo: calcola(a, ora, &o),
+                    calcolo: {
+                        let mut c = calcola(a, ora, &o);
+                        // processo vivo in un terminale: la sessione è aperta e aspetta solo un messaggio, non è «in porto»
+                        if c.stato == crate::engine::Stato::Inattivo && self.posizioni.contains_key(&k) {
+                            c.stato = crate::engine::Stato::Finito;
+                            c.motivo = crate::engine::Motivo::FineTurno;
+                            c.stimato = false;
+                            c.azione = "Aperta, pronta per un nuovo compito".into();
+                        }
+                        c
+                    },
                 }
             })
             .collect();

@@ -2,6 +2,7 @@
 use crew_deck_lib::{ora_ms, scanner::Scanner};
 
 fn main() {
+    crew_deck_lib::completa_path();
     let home = dirs::home_dir().expect("home");
     let mut s = Scanner::new(&home);
     let t0 = std::time::Instant::now();
