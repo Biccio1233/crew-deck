@@ -125,6 +125,11 @@ fn chiudi_sessione(plancia: tauri::State<Plancia>, agente: String, id: String, r
 }
 
 #[tauri::command]
+async fn stato_cmux() -> serde_json::Value {
+    tauri::async_runtime::spawn_blocking(azioni::stato_cmux).await.unwrap_or_default()
+}
+
+#[tauri::command]
 fn debriefing(giorni: Option<i64>) -> serde_json::Value {
     carteggio::debriefing(giorni.unwrap_or(7))
 }
@@ -150,7 +155,7 @@ pub fn run() {
             });
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![sessioni, apri_sessione, giudica_prompt, riscrivi_prompt, suggerisci_risposta, invia_prompt, nuova_sessione, chiudi_sessione, debriefing])
+        .invoke_handler(tauri::generate_handler![sessioni, apri_sessione, giudica_prompt, riscrivi_prompt, suggerisci_risposta, invia_prompt, nuova_sessione, chiudi_sessione, stato_cmux, debriefing])
         .run(tauri::generate_context!())
         .expect("errore all'avvio di Crew Deck");
 }

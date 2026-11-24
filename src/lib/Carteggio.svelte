@@ -37,6 +37,14 @@
   let modoRiscrittura = $state<"rifinisci" | "approfondisci" | null>(null);
   let riscrivendo = $state(false);
   let conferma = $state(false);
+  let cmuxStato = $state<{ installato: boolean; accesso: boolean; password_salvata: boolean } | null>(null);
+  async function apriConferma() {
+    conferma = true;
+    cmuxStato = null;
+    if (scelta?.posizione?.app === "cmux" && !anteprima) {
+      cmuxStato = await invoke<{ installato: boolean; accesso: boolean; password_salvata: boolean }>("stato_cmux").catch(() => null);
+    }
+  }
   let esito = $state<{ testo: string; errore: boolean } | null>(null);
   let agenteNuovo = $state<"claude" | "codex" | "pi">("claude");
   let cartellaNuova = $state("");
@@ -226,7 +234,7 @@
       </button>
       <span class="spazio"></span>
       {#if segnaposti}<span class="nota">{segnaposti} {segnaposti === 1 ? "segnaposto da compilare" : "segnaposti da compilare"}</span>{/if}
-      <button class="pri" disabled={!testo.trim() || (destinazione !== "nuova" && !scelta) || (destinazione === "nuova" && !cartellaNuova)} onclick={() => (conferma = true)}>
+      <button class="pri" disabled={!testo.trim() || (destinazione !== "nuova" && !scelta) || (destinazione === "nuova" && !cartellaNuova)} onclick={apriConferma}>
         {destinazione === "nuova" ? "Apri sessione" : "Invia"}
       </button>
     </div>
@@ -237,6 +245,16 @@
           <p>Apro una sessione di <strong>{agenteNuovo}</strong> in <span class="mono">{cartellaNuova.replace(/^\/Users\/[^/]+/, "~")}</span> con questa richiesta?</p>
           <div><button class="pri" onclick={() => invia(true)}>Apri</button><button class="sec" onclick={() => (conferma = false)}>Annulla</button></div>
         {:else}
+          {#if scelta?.posizione?.app === "cmux" && cmuxStato && !cmuxStato.accesso}
+            <div class="avviso-cmux">
+              <strong>cmux non accetta ancora comandi da Crew Deck.</strong> Se continui, il prompt va negli appunti e lo incolli tu con ⌘V.
+              Per l'invio diretto, una volta sola:
+              <ol>
+                <li>in cmux: <em>Impostazioni › Automazione</em>, modalità <em>password</em>, scegli una password;</li>
+                <li>{cmuxStato.password_salvata ? "la password è già nel portachiavi: controlla che sia la stessa" : "salvala nel portachiavi da Terminale:"}{#if !cmuxStato.password_salvata} <code>security add-generic-password -s crew-deck -a cmux -w</code>{/if}</li>
+              </ol>
+            </div>
+          {/if}
           <p>Scrivo la richiesta nella scheda di <strong>{scelta?.progetto}</strong> ({scelta?.posizione?.app}){scelta?.stato === "lavora" ? ": l'agente sta lavorando, la riceverà in coda" : ""}.{#if segnaposti} Restano {segnaposti} segnaposti [[…]].{/if}</p>
           <div>
             <button class="pri" onclick={() => invia(true)}>Scrivi e invia</button>
@@ -348,6 +366,10 @@
   .conferma p { margin: 0 0 10px; }
   .conferma div { display: flex; gap: 8px; }
   .mono { font-family: var(--mono); font-size: 12px; }
+  .avviso-cmux { border: 1px solid var(--c-aspetta); background: var(--tinta-aspetta); border-radius: 6px; padding: 10px 12px; margin-bottom: 10px; color: var(--testo-2); }
+  .avviso-cmux strong { color: var(--testo); }
+  .avviso-cmux ol { margin: 6px 0 0; padding-left: 18px; display: grid; gap: 4px; }
+  .avviso-cmux code { font-family: var(--mono); font-size: 11.5px; background: var(--bg); padding: 1px 5px; border-radius: 4px; user-select: all; }
 
   .conversazione { border: 1px solid var(--bordo); border-radius: 8px; padding: 12px 14px; display: grid; gap: 10px; background: var(--pannello); }
   .conv-testa { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }

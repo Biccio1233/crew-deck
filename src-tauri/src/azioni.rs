@@ -31,13 +31,26 @@ fn password_cmux() -> Option<String> {
     out.status.success().then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
-fn cmux(args: &[&str]) -> Result<(), String> {
+pub fn cmux(args: &[&str]) -> Result<(), String> {
+    cmux_con(args, None)
+}
+
+/// Comando cmux con testo opzionale su stdin. Usa la password del socket dal portachiavi, se c'è.
+pub fn cmux_con(args: &[&str], stdin: Option<&str>) -> Result<(), String> {
     let mut c = Command::new("cmux");
     c.args(args).env("CMUX_QUIET", "1");
     if let Some(p) = password_cmux() {
         c.env("CMUX_SOCKET_PASSWORD", p);
     }
-    let out = c.output().map_err(|e| e.to_string())?;
+    let out = if let Some(t) = stdin {
+        use std::io::Write;
+        c.stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped());
+        let mut f = c.spawn().map_err(|e| e.to_string())?;
+        f.stdin.take().unwrap().write_all(t.as_bytes()).map_err(|e| e.to_string())?;
+        f.wait_with_output().map_err(|e| e.to_string())?
+    } else {
+        c.output().map_err(|e| e.to_string())?
+    };
     let err = String::from_utf8_lossy(&out.stderr).to_string() + &String::from_utf8_lossy(&out.stdout);
     if out.status.success() && !err.contains("ERROR") { Ok(()) } else { Err(err.trim().to_string()) }
 }
@@ -144,4 +157,11 @@ pub fn link_desktop(agente: Agente, id: &str, origine: Option<&str>) -> Option<(
 pub fn apri_link(url: &str, nome: &str) -> Esito {
     let st = Command::new("open").arg(url).status().map_err(|e| e.to_string())?;
     if st.success() { Ok(format!("Aperta nell'{nome}")) } else { Err(format!("Non riesco ad aprire l'{nome}")) }
+}
+
+/// cmux accetta comandi da Crew Deck? (installato, e socket aperto in modalità password o simile)
+pub fn stato_cmux() -> serde_json::Value {
+    let installato = Command::new("cmux").arg("--help").output().map(|o| o.status.success()).unwrap_or(false);
+    let accesso = installato && cmux(&["workspace", "list"]).is_ok();
+    serde_json::json!({ "installato": installato, "accesso": accesso, "password_salvata": password_cmux().is_some() })
 }

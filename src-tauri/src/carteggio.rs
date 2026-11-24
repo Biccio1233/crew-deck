@@ -141,6 +141,26 @@ pub fn invia(pos: &Posizione, testo: &str, invio: bool) -> Result<String, String
             }
         }
     }
+    if pos.app == "cmux" {
+        if let (Some(ws), Some(sf)) = (&pos.cmux_workspace, &pos.cmux_surface) {
+            let mut args = vec!["paste", "--workspace", ws.as_str(), "--surface", sf.as_str()];
+            if invio {
+                args.push("--submit");
+            }
+            args.push("-");
+            match crate::azioni::cmux_con(&args, Some(testo)) {
+                Ok(()) => {
+                    let _ = crate::azioni::vai(pos);
+                    return Ok(if invio { "Inviato in cmux".into() } else { "Scritto in cmux: premi Invio quando vuoi".into() });
+                }
+                Err(_) => {
+                    appunti(testo)?;
+                    let _ = crate::azioni::vai(pos);
+                    return Ok("cmux non accetta comandi da Crew Deck: il prompt è negli appunti, incollalo con ⌘V. Per l'invio diretto: cmux › Impostazioni › Automazione › modalità password.".into());
+                }
+            }
+        }
+    }
     appunti(testo)?;
     let _ = crate::azioni::vai(pos);
     Ok(format!("Copiato negli appunti: incollalo con ⌘V nella scheda di {}", pos.app))
