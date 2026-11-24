@@ -32,7 +32,7 @@ Requirements: Node 20+, Rust (stable), and the [Tauri prerequisites](https://v2.
 npm install
 npm run tauri dev                              # the app
 cd src-tauri && cargo test                     # state-engine tests
-cargo run --release --bin vedetta              # terminal view of your sessions
+cargo run --release --example vedetta          # terminal view of your sessions
 ```
 
 ## Credits
