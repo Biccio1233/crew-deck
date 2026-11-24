@@ -126,3 +126,22 @@ crew-deck/
 2. Repo pubblico `crew-deck`, licenza **MIT**.
 3. Hook opzionali di Claude Code per gli stati certi: **sì, in fase 2**, solo dopo conferma dell'utente e con backup delle impostazioni.
 4. Distribuzione come pacchetto nativo per sistema (niente container: è un'app desktop).
+
+## 10. Versione 1.0 — decisioni del grilling (23/11/2026)
+
+**Per chi**: pubblica su GitHub, tarata sull'uso del primo utente; i primi tester sono colleghi. **Sistemi**: solo macOS fino alla 1.0; Windows e Linux dopo. **Licenza**: gratuita, open source, MIT. **Lingua**: italiano predefinito, inglese prima della 1.0 pubblica. **Distribuzione**: versioni di prova non firmate per i tester (clic destro › Apri la prima volta); firma e notarizzazione Apple prima della 1.0 pubblica.
+
+**Entra nella 1.0, tutto**:
+- Plancia, Apri/Riprendi/Chiudi, Carteggio, Debriefing, giudice dei prompt (fatti).
+- Torretta sempre in primo piano, icona nella barra dei menu, notifiche, impostazioni, hook opzionali di Claude Code.
+- **Server remoti** via SSH con chiave, in sola lettura: le sessioni di Claude sul server compaiono nella Plancia con l'etichetta del server; «Apri» apre `ssh -t <server> tmux attach` sulla finestra giusta (processo → terminale → pannello di tmux).
+- Esito dei prompt (correzioni e interruzioni dopo un prompt) e giornale di bordo settimanale.
+- Carta nautica, Porto servizi, Cassaforte.
+- **Arsenale**: agenti installati e collegati con il loro abbonamento, servizi MCP di ciascun agente con stato (attivo, errore, da autenticare), server raggiungibili, skill installate.
+- **Flotta**: una skill di Claude Code che affida compiti ad altri agenti con i loro comandi non interattivi (`codex exec`, poi `gemini -p`). Regole iniziali: secondo parere di Codex prima di un merge importante; Perplexity per ricerche con fonti aggiornate. L'utente può chiedere in ogni momento una verifica incrociata. I compiti affidati compaiono sotto la sessione che li ha lanciati; i loro costi si sommano nei Conti, per agente e per sessione di partenza.
+
+**Account dei tester**: il giudice usa la chiave TypeSafe di ciascuno, nel portachiavi; senza chiave il controllo è spento e il resto funziona. Rifinisci, Approfondisci e Cosa rispondere usano `claude`, altrimenti `codex exec`.
+
+**Altri agenti** (Gemini CLI, OpenCode, Aider…): un lettore per ciascuno quando qualcuno lo installa, partendo da Gemini. Nessun lettore viene dichiarato pronto senza un collaudo su registri veri.
+
+**Tappe**: 0.5 collaudo + versione di prova per i colleghi · 0.6 torretta, notifiche, impostazioni, hook · 0.7 server remoti · 0.8 Arsenale, Flotta, costi dei compiti affidati · 0.9 esito dei prompt, giornale di bordo, lettore Gemini · 0.10 Carta nautica, Porto servizi, Cassaforte · 1.0 inglese, firma Apple, audit di sicurezza, prova di carico, documentazione, rilascio pubblico.
