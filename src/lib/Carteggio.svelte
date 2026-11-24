@@ -38,6 +38,14 @@
   let riscrivendo = $state(false);
   let conferma = $state(false);
   let cmuxStato = $state<{ installato: boolean; accesso: boolean; password_salvata: boolean } | null>(null);
+  let primoConferma = $state<HTMLButtonElement | null>(null);
+  // la conferma compare sotto il campo: la si porta in vista col fuoco sul pulsante principale (Invio conferma)
+  $effect(() => {
+    if (primoConferma) {
+      primoConferma.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      primoConferma.focus();
+    }
+  });
   async function apriConferma() {
     conferma = true;
     cmuxStato = null;
@@ -235,7 +243,7 @@
       <span class="spazio"></span>
       {#if segnaposti}<span class="nota">{segnaposti} {segnaposti === 1 ? "segnaposto da compilare" : "segnaposti da compilare"}</span>{/if}
       <button class="pri" disabled={!testo.trim() || (destinazione !== "nuova" && !scelta) || (destinazione === "nuova" && !cartellaNuova)} onclick={apriConferma}>
-        {destinazione === "nuova" ? "Apri sessione" : "Invia"}
+        {destinazione === "nuova" ? "Apri sessione…" : "Invia…"}
       </button>
     </div>
 
@@ -243,7 +251,7 @@
       <div class="conferma" role="alertdialog" aria-label="Conferma invio">
         {#if destinazione === "nuova"}
           <p>Apro una sessione di <strong>{agenteNuovo}</strong> in <span class="mono">{cartellaNuova.replace(/^\/Users\/[^/]+/, "~")}</span> con questa richiesta?</p>
-          <div><button class="pri" onclick={() => invia(true)}>Apri</button><button class="sec" onclick={() => (conferma = false)}>Annulla</button></div>
+          <div><button class="pri" bind:this={primoConferma} onclick={() => invia(true)}>Apri</button><button class="sec" onclick={() => (conferma = false)}>Annulla</button></div>
         {:else}
           {#if scelta?.posizione?.app === "cmux" && cmuxStato && !cmuxStato.accesso}
             <div class="avviso-cmux">
@@ -257,7 +265,7 @@
           {/if}
           <p>Scrivo la richiesta nella scheda di <strong>{scelta?.progetto}</strong> ({scelta?.posizione?.app}){scelta?.stato === "lavora" ? ": l'agente sta lavorando, la riceverà in coda" : ""}.{#if segnaposti} Restano {segnaposti} segnaposti [[…]].{/if}</p>
           <div>
-            <button class="pri" onclick={() => invia(true)}>Scrivi e invia</button>
+            <button class="pri" bind:this={primoConferma} onclick={() => invia(true)}>Scrivi e invia</button>
             <button class="sec" onclick={() => invia(false)}>Scrivi senza inviare</button>
             <button class="sec" onclick={() => (conferma = false)}>Annulla</button>
           </div>

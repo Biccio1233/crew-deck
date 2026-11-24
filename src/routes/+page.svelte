@@ -146,7 +146,7 @@
 
 
     <div class="destra">
-      <span class="costo" title="Costo noto nelle ultime 24 ore">oggi <strong>${costoOggi.toFixed(2)}</strong></span>
+      <span class="costo" title="Costo stimato a listino nelle ultime 24 ore: lo calcola pi dai prezzi pubblici, non è un addebito. Claude Code e Codex non lo scrivono.">stimato oggi <strong>${costoOggi.toFixed(2)}</strong></span>
       {#if vista === "plancia"}
       <button class="interruttore" aria-pressed={automatiche} onclick={() => (automatiche = !automatiche)}
         title="Sessioni avviate da altri programmi (graphify, Floorplan, script)">Automatiche</button>
@@ -193,7 +193,7 @@
                 <span class="ico"><Icona stato={s.stato} /></span>
                 <span class="principale">
                   <span class="r1">
-                    <span class="progetto">{s.progetto}</span>
+                    <span class="progetto" title={s.cartella?.replace(/^\/Users\/[^/]+/, "~") ?? ""}>{s.progetto}</span>
                     {#if s.titolo}<span class="titolo">{s.titolo}</span>{/if}
                   </span>
                   <span class="azione">
@@ -208,7 +208,7 @@
                     {#if appDesktop(s)}<span class="ruolo desk">app</span>{/if}
                     <span class="ruolo">{RUOLI[s.ruolo] ?? s.ruolo}</span>
                   </span>
-                  <span class="numeri">{token(s)} tok{#if s.costo_usd != null}{" · "}${s.costo_usd.toFixed(2)}{/if}</span>
+                  <span class="numeri">{token(s)} tok{#if s.costo_usd != null}{" · "}<span title="Costo stimato a listino: lo calcola pi dai prezzi pubblici, non è un addebito">stimato ${s.costo_usd.toFixed(2)}</span>{/if}</span>
                 </span>
               </button>
               <button class="vai" class:viva={!!s.posizione || !!appDesktop(s)} disabled={inCorso === chiave(s) || (!s.posizione && !appDesktop(s) && !s.cartella)}

@@ -163,7 +163,12 @@ impl Scanner {
                     posizione: self.posizioni.get(&k).cloned(),
                     ultima_app: self.ultima_app.get(&k).cloned(),
                     agente: a.agente,
-                    progetto: a.cwd.as_deref().map(progetto).unwrap_or_else(|| "?".into()),
+                    // in cmux il nome è quello dato allo spazio di lavoro nella colonna di cmux
+                    progetto: self
+                        .posizioni
+                        .get(&k)
+                        .and_then(|p| p.cmux_titolo.clone())
+                        .unwrap_or_else(|| a.cwd.as_deref().map(progetto).unwrap_or_else(|| "?".into())),
                     cartella: a.cwd.clone(),
                     titolo: a.titolo.clone(),
                     modello: a.modello.clone(),

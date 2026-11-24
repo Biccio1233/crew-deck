@@ -25,10 +25,30 @@ fn attiva(app: &str) -> Esito {
     if st.success() { Ok(format!("{app} in primo piano")) } else { Err(format!("Non riesco ad aprire {app}")) }
 }
 
-/// Password del socket di cmux, se l'utente l'ha salvata nel portachiavi (servizio "crew-deck", account "cmux").
+/// Password del socket di cmux dal portachiavi. Letta una volta sola quando c'è (la Plancia chiede
+/// i nomi degli spazi ogni 5 secondi). ponytail: se si cambia la password serve riaprire l'app.
 fn password_cmux() -> Option<String> {
+    static TROVATA: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    if let Some(p) = TROVATA.get() {
+        return Some(p.clone());
+    }
     let out = Command::new("security").args(["find-generic-password", "-s", "crew-deck", "-a", "cmux", "-w"]).output().ok()?;
-    out.status.success().then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
+    let p = out.status.success().then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())?;
+    Some(TROVATA.get_or_init(|| p).clone())
+}
+
+/// Comando cmux che risponde in JSON (con la password del socket, se c'è).
+pub fn cmux_json(args: &[&str]) -> Option<serde_json::Value> {
+    let mut c = Command::new("cmux");
+    c.args(args).env("CMUX_QUIET", "1");
+    if let Some(p) = password_cmux() {
+        c.env("CMUX_SOCKET_PASSWORD", p);
+    }
+    let out = c.output().ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    serde_json::from_slice(&out.stdout).ok()
 }
 
 pub fn cmux(args: &[&str]) -> Result<(), String> {

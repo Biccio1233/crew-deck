@@ -15,6 +15,8 @@ pub struct Posizione {
     /// Spazio di lavoro e pannello di cmux, quando la sessione è dentro cmux.
     pub cmux_workspace: Option<String>,
     pub cmux_surface: Option<String>,
+    /// Nome dello spazio di lavoro come appare nella colonna di cmux.
+    pub cmux_titolo: Option<String>,
     /// true se il collegamento processo↔sessione è dedotto da agente e cartella.
     pub incerta: bool,
 }
@@ -131,7 +133,30 @@ pub fn localizza(sessioni: &[Cercata]) -> HashMap<String, Posizione> {
     let agenti: Vec<(&Processo, Agente)> = tabella.values().filter_map(|p| agente_di(&p.comando).map(|a| (p, a))).collect();
     let cwd = cartelle(&agenti.iter().map(|(p, _)| p.pid).collect::<Vec<_>>());
     let cmux = registro_cmux();
-    collega(sessioni, &tabella, &agenti, &cwd, &cmux)
+    let mut out = collega(sessioni, &tabella, &agenti, &cwd, &cmux);
+    if out.values().any(|p| p.cmux_workspace.is_some()) {
+        let titoli = crate::azioni::cmux_json(&["workspace", "list", "--json"]).map(|v| titoli_cmux(&v)).unwrap_or_default();
+        for p in out.values_mut() {
+            p.cmux_titolo = p.cmux_workspace.as_ref().and_then(|w| titoli.get(w).cloned());
+        }
+    }
+    out
+}
+
+/// Spazio di lavoro → nome mostrato nella colonna di cmux, da `cmux workspace list --json`.
+/// ponytail: legge solo la finestra corrente di cmux; con più finestre gli spazi delle altre restano
+/// senza nome (si mostra la cartella). Si supera chiedendo la lista per ogni finestra.
+pub fn titoli_cmux(v: &serde_json::Value) -> HashMap<String, String> {
+    v.get("workspaces")
+        .and_then(|w| w.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|w| {
+            let id = w.get("id")?.as_str()?;
+            let t = w.get("title")?.as_str()?.trim();
+            (!t.is_empty()).then(|| (id.to_string(), t.to_string()))
+        })
+        .collect()
 }
 
 /// Parte pura del collegamento, testabile senza processi veri.
@@ -152,6 +177,7 @@ pub fn collega(
         cwd: cwd.get(&p.pid).cloned(),
         cmux_workspace: cm.map(|c| c.0.clone()),
         cmux_surface: cm.map(|c| c.1.clone()),
+        cmux_titolo: None,
         incerta,
     };
 

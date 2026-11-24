@@ -55,3 +55,20 @@ fn link_delle_app_desktop() {
     assert!(link_desktop(Agente::Claude, "abc", Some("cli")).is_none());
     assert!(link_desktop(Agente::Codex, "x;rm -rf", Some("Codex Desktop")).is_none());
 }
+
+#[test]
+fn nomi_degli_spazi_di_cmux() {
+    let v: serde_json::Value = serde_json::from_str(
+        r#"{"window_ref":"window:1","workspaces":[
+            {"id":"W1","title":"checkout","custom_title":"checkout"},
+            {"id":"W2","title":"dev@server: ~","custom_title":null},
+            {"id":"W3","title":"  "},
+            {"id":"W4"}]}"#,
+    )
+    .unwrap();
+    let t = crew_deck_lib::localizza::titoli_cmux(&v);
+    assert_eq!(t.get("W1").map(String::as_str), Some("checkout"));
+    assert_eq!(t.get("W2").map(String::as_str), Some("dev@server: ~"));
+    assert!(!t.contains_key("W3") && !t.contains_key("W4"));
+    assert!(crew_deck_lib::localizza::titoli_cmux(&serde_json::json!({})).is_empty());
+}
