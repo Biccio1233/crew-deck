@@ -160,6 +160,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(Plancia(Mutex::new(Scanner::new(&home))))
+        .menu(menu_italiano)
         .setup(|app| {
             // vedetta: ogni 2 secondi rilegge le code dei registri e manda lo stato all'interfaccia
             let handle = app.handle().clone();
@@ -178,4 +179,38 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![sessioni, apri_sessione, giudica_prompt, riscrivi_prompt, suggerisci_risposta, invia_prompt, nuova_sessione, chiudi_sessione, stato_cmux, debriefing])
         .run(tauri::generate_context!())
         .expect("errore all'avvio di Crew Deck");
+}
+
+/// Menu dell'app in italiano: quello predefinito di Tauri è in inglese. Modifica serve anche a ⌘C/⌘V nei campi.
+fn menu_italiano<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<tauri::menu::Menu<R>> {
+    use tauri::menu::{AboutMetadata, Menu, PredefinedMenuItem as P, Submenu};
+    let sep = || P::separator(app);
+    let app_menu = Submenu::with_items(app, "Crew Deck", true, &[
+        &P::about(app, Some("Informazioni su Crew Deck"), Some(AboutMetadata::default()))?,
+        &sep()?,
+        &P::services(app, Some("Servizi"))?,
+        &sep()?,
+        &P::hide(app, Some("Nascondi Crew Deck"))?,
+        &P::hide_others(app, Some("Nascondi altre"))?,
+        &P::show_all(app, Some("Mostra tutte"))?,
+        &sep()?,
+        &P::quit(app, Some("Esci da Crew Deck"))?,
+    ])?;
+    let modifica = Submenu::with_items(app, "Modifica", true, &[
+        &P::undo(app, Some("Annulla"))?,
+        &P::redo(app, Some("Ripeti"))?,
+        &sep()?,
+        &P::cut(app, Some("Taglia"))?,
+        &P::copy(app, Some("Copia"))?,
+        &P::paste(app, Some("Incolla"))?,
+        &P::select_all(app, Some("Seleziona tutto"))?,
+    ])?;
+    let vista = Submenu::with_items(app, "Vista", true, &[&P::fullscreen(app, Some("Schermo intero"))?])?;
+    let finestra = Submenu::with_items(app, "Finestra", true, &[
+        &P::minimize(app, Some("Riduci nel Dock"))?,
+        &P::maximize(app, Some("Ingrandisci"))?,
+        &sep()?,
+        &P::close_window(app, Some("Chiudi finestra"))?,
+    ])?;
+    Menu::with_items(app, &[&app_menu, &modifica, &vista, &finestra])
 }

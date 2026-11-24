@@ -28,6 +28,15 @@
     tattico: "Tattico", navigatore: "Navigatore", prodiere: "Prodiere",
     grinder: "Grinder", randista: "Randista", timoniere: "Timoniere",
   };
+  // cosa fa di più la sessione nel turno corrente, dagli strumenti che usa (engine.rs, fn ruolo)
+  const RUOLI_SPIEGA: Record<string, string> = {
+    tattico: "Tattico: pianifica, aggiorna la lista delle cose da fare o ti fa domande",
+    navigatore: "Navigatore: cerca sul web e legge pagine",
+    prodiere: "Prodiere: legge e cerca nei file",
+    grinder: "Grinder: scrive e modifica file",
+    randista: "Randista: esegue comandi nel terminale",
+    timoniere: "Timoniere: coordina aiutanti (sotto-agenti)",
+  };
   const AGENTI: Record<string, string> = { claude: "Claude Code", codex: "Codex", pi: "pi" };
 
   let sessioni = $state<Vista[]>([]);
@@ -55,8 +64,14 @@
       .filter((sez) => sez.righe.length > 0)
   );
   const naviga = $derived(conta.lavora > 0);
-  const costoOggi = $derived(
-    umane.filter((s) => s.ultima_attivita > ora - 86_400_000).reduce((t, s) => t + (s.costo_usd ?? 0), 0)
+  const conCostoOggi = $derived(
+    umane.filter((s) => s.ultima_attivita > ora - 86_400_000 && s.costo_usd).sort((a, b) => b.costo_usd! - a.costo_usd!)
+  );
+  const costoOggi = $derived(conCostoOggi.reduce((t, s) => t + s.costo_usd!, 0));
+  const dettaglioCosti = $derived(
+    "Costo stimato a listino nelle ultime 24 ore: lo calcola pi dai prezzi pubblici, non è un addebito. Claude Code e Codex non lo scrivono." +
+      conCostoOggi.slice(0, 8).map((s) => `\n$${s.costo_usd!.toFixed(2)} · ${s.progetto}${s.titolo ? " · " + s.titolo.slice(0, 40) : ""}`).join("") +
+      (conCostoOggi.length > 8 ? `\n… e altre ${conCostoOggi.length - 8}` : "")
   );
 
   function trascorso(ms: number) {
@@ -146,7 +161,7 @@
 
 
     <div class="destra">
-      <span class="costo" title="Costo stimato a listino nelle ultime 24 ore: lo calcola pi dai prezzi pubblici, non è un addebito. Claude Code e Codex non lo scrivono.">stimato oggi <strong>${costoOggi.toFixed(2)}</strong></span>
+      <span class="costo" title={dettaglioCosti}>stimato oggi <strong>${costoOggi.toFixed(2)}</strong></span>
       {#if vista === "plancia"}
       <button class="interruttore" aria-pressed={automatiche} onclick={() => (automatiche = !automatiche)}
         title="Sessioni avviate da altri programmi (graphify, Floorplan, script)">Automatiche</button>
@@ -206,7 +221,7 @@
                   <span class="etichette">
                     <span class="agente {s.agente}">{AGENTI[s.agente]}</span>
                     {#if appDesktop(s)}<span class="ruolo desk">app</span>{/if}
-                    <span class="ruolo">{RUOLI[s.ruolo] ?? s.ruolo}</span>
+                    <span class="ruolo" title={RUOLI_SPIEGA[s.ruolo] ?? ""}>{RUOLI[s.ruolo] ?? s.ruolo}</span>
                   </span>
                   <span class="numeri">{token(s)} tok{#if s.costo_usd != null}{" · "}<span title="Costo stimato a listino: lo calcola pi dai prezzi pubblici, non è un addebito">stimato ${s.costo_usd.toFixed(2)}</span>{/if}</span>
                 </span>

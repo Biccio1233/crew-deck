@@ -151,3 +151,15 @@ fn pi_ciclo_con_costo() {
     assert!((b.costo_usd.unwrap() - 0.75).abs() < 1e-9);
     assert_eq!(b.cwd.as_deref(), Some("/p/pi"));
 }
+
+#[test]
+fn nomi_leggibili_di_strumenti_e_cartelle() {
+    use crew_deck_lib::model::azione_strumento;
+    assert_eq!(azione_strumento("mcp__cmux-cua__get_window_state", &json!({})), "Usa cmux-cua: get window state");
+    assert_eq!(azione_strumento("mcp__plugin_firecrawl_firecrawl__scrape", &json!({})), "Usa firecrawl firecrawl: scrape");
+    assert_eq!(azione_strumento("Strano", &json!({})), "Usa Strano");
+    let home = dirs::home_dir().unwrap().to_string_lossy().to_string();
+    assert_eq!(crew_deck_lib::scanner::progetto(&home), "Cartella home");
+    assert_eq!(crew_deck_lib::scanner::progetto(&format!("{home}/")), "Cartella home");
+    assert_eq!(crew_deck_lib::scanner::progetto("/tmp/esempio/checkout-api"), "checkout-api");
+}

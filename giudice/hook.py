@@ -64,7 +64,7 @@ def lavora(evento: dict) -> None:
         "ts": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         "agente": "claude",
         "sessione": evento.get("session_id"),
-        "progetto": os.path.basename(cwd.rstrip("/")) or None,
+        "progetto": "Cartella home" if cwd.rstrip("/") == os.path.expanduser("~").rstrip("/") else (os.path.basename(cwd.rstrip("/")) or None),
         "parole": len(prompt.split()),
         # impronta per riconoscere lo stesso prompt in seguito, senza conservarne il testo
         "impronta": hashlib.sha256(prompt.encode()).hexdigest()[:16],

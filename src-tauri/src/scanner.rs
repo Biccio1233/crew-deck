@@ -224,7 +224,12 @@ fn raccogli(dir: &Path, out: &mut Vec<PathBuf>, prof: u8) {
 }
 
 /// Nome leggibile del progetto: l'ultima cartella del percorso.
+/// Nella cartella home si scrive «Cartella home» invece del nome utente.
 pub fn progetto(cwd: &str) -> String {
+    let senza_barra = cwd.trim_end_matches(['/', '\\']);
+    if dirs::home_dir().is_some_and(|h| h.to_string_lossy().trim_end_matches('/') == senza_barra) {
+        return "Cartella home".into();
+    }
     cwd.trim_end_matches(['/', '\\']).rsplit(['/', '\\']).next().unwrap_or(cwd).to_string()
 }
 

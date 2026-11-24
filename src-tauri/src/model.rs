@@ -243,6 +243,10 @@ pub fn azione_strumento(nome: &str, input: &serde_json::Value) -> String {
         "askuserquestion" | "request_user_input" => "Ti fa una domanda".into(),
         "todowrite" => "Aggiorna la lista delle cose da fare".into(),
         "codemode" => "Esegue uno script di strumenti".into(),
-        _ => format!("Usa {}", nome),
+        // mcp__server__strumento (Claude) → «Usa server: strumento»
+        _ => match nome.strip_prefix("mcp__").and_then(|r| r.split_once("__")) {
+            Some((server, strumento)) => format!("Usa {}: {}", server.replace("plugin_", "").replace('_', " "), strumento.replace('_', " ")),
+            None => format!("Usa {}", nome),
+        },
     }
 }
