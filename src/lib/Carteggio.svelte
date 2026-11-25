@@ -72,7 +72,7 @@
   const aperte = $derived(sessioni.filter((s) => s.posizione && !s.id.startsWith("_")));
   const cartelle = $derived([...new Set([...cartelleScelte, ...sessioni.map((s) => s.cartella).filter((c): c is string => !!c)])].slice(0, 30));
   const breve = (p: string) => p.replace(/^\/Users\/[^/]+/, "~");
-  const rigaAttiva = $derived(destinazione === "nuova" && !!cervello && conCervello && !!rigaCervello);
+  const rigaAttiva = $derived(destinazione === "nuova" && !!cervello && conCervello);
   async function scegli(titolo: string): Promise<string | null> {
     try { return await invoke<string | null>("scegli_cartella", { titolo }); }
     catch (e) { mostra(String(e), true); return null; }
@@ -191,12 +191,16 @@
   }
   async function invia(conInvio: boolean) {
     conferma = false;
+    // si fotografa ciò che è stato confermato prima di ogni attesa: il clic autorizza esattamente questo invio
+    const nuova = destinazione === "nuova";
+    const s = scelta;
+    const ag = agenteNuovo, cart = cartellaNuova, t = testo, cerv = rigaAttiva ? cervello : "";
     try {
-      // la riga si ricalcola al momento dell'invio dal cervello attuale: mai quella di un cervello appena cambiato
-      const riga = rigaAttiva && !anteprima ? await invoke<string>("riga_cervello", { percorso: cervello }) : "";
-      const msg = destinazione === "nuova"
-        ? await invoke<string>("nuova_sessione", { agente: agenteNuovo, cartella: cartellaNuova, testo: riga + testo })
-        : await invoke<string>("invia_prompt", { agente: scelta!.agente, id: scelta!.id, testo, invio: conInvio });
+      // la riga si calcola al momento dell'invio dal cervello confermato, non dall'anteprima
+      const riga = cerv && !anteprima ? await invoke<string>("riga_cervello", { percorso: cerv }) : "";
+      const msg = nuova
+        ? await invoke<string>("nuova_sessione", { agente: ag, cartella: cart, testo: riga + t })
+        : await invoke<string>("invia_prompt", { agente: s!.agente, id: s!.id, testo: t, invio: conInvio });
       mostra(msg);
     } catch (e) {
       mostra(String(e), true);
