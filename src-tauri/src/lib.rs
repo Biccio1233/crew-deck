@@ -35,14 +35,19 @@ fn hook_attese() -> Option<bool> {
 /// «fine» (Stop) cancella il segnale quando Claude ha finito di rispondere.
 const VOCI_ATTESA: [(&str, &str, &str); 3] = [("PreToolUse", "AskUserQuestion", "domanda"), ("Notification", "permission_prompt", "permesso"), ("Stop", "", "fine")];
 
+/// Il comando lancia attesa.py con questo motivo? Percorso con o senza virgolette, semplici o doppie.
+fn comando_attesa(comando: &str, motivo: &str) -> bool {
+    let parole: Vec<_> = comando.split_whitespace().map(|w| w.trim_matches(['"', '\''])).collect();
+    parole.windows(2).any(|w| w[0].ends_with("attesa.py") && w[1] == motivo)
+}
+
 /// C'è già, sotto `evento` e con lo stesso matcher, un comando di attesa.py con questo motivo?
 /// Per Stop il matcher non conta (Claude Code lo ignora).
 fn ha_voce(cfg: &serde_json::Value, evento: &str, matcher: &str, motivo: &str) -> bool {
-    let cerca = format!("attesa.py\" {motivo} ");
     cfg["hooks"][evento].as_array().is_some_and(|l| {
         l.iter().any(|v| {
             (matcher.is_empty() || v["matcher"].as_str() == Some(matcher))
-                && v["hooks"].as_array().is_some_and(|h| h.iter().any(|c| c["command"].as_str().is_some_and(|t| format!("{t} ").contains(&cerca))))
+                && v["hooks"].as_array().is_some_and(|h| h.iter().any(|c| c["command"].as_str().is_some_and(|t| comando_attesa(t, motivo))))
         })
     })
 }
@@ -80,7 +85,12 @@ fn attiva_hook_attese() -> Result<String, String> {
     }
     // scrittura atomica: file accanto, poi rinomina; un'interruzione non lascia mai settings.json a metà.
     // Se settings.json è un collegamento, si sostituisce il file a cui punta; i permessi restano quelli di prima.
-    let bersaglio = std::fs::canonicalize(&file).unwrap_or_else(|_| file.clone());
+    let collegamento = std::fs::symlink_metadata(&file).is_ok_and(|m| m.file_type().is_symlink());
+    let bersaglio = match std::fs::canonicalize(&file) {
+        Ok(b) => b,
+        Err(_) if collegamento => return Err("settings.json è un collegamento a un file che non esiste: non lo tocco".into()),
+        Err(_) => file.clone(),
+    };
     let cartella = bersaglio.parent().ok_or("cartella di settings.json non trovata")?;
     let temp = cartella.join(format!(".settings.json.tmp-crewdeck-{}", ora_ms()));
     let scrivi = || -> std::io::Result<()> {
@@ -316,6 +326,15 @@ mod prova_hook {
     use super::*;
 
     #[test]
+    fn riconosce_i_comandi_scritti_a_mano() {
+        assert!(comando_attesa("python3 \"/a b/attesa.py\" domanda 2>/dev/null || true", "domanda"));
+        assert!(comando_attesa("python3 /x/giudice/attesa.py permesso", "permesso"));
+        assert!(comando_attesa("python3 '/x/attesa.py' fine", "fine"));
+        assert!(!comando_attesa("python3 /x/attesa.py domanda", "permesso"));
+        assert!(!comando_attesa("python3 /x/attesa.py domandaX", "domanda"));
+    }
+
+    #[test]
     fn attiva_hook_attese_su_home_finta() {
         let home = std::env::temp_dir().join(format!("crewdeck-hook-{}", ora_ms()));
         std::fs::create_dir_all(home.join(".claude")).unwrap();
@@ -363,6 +382,11 @@ mod prova_hook {
         assert!(std::fs::symlink_metadata(&file).unwrap().file_type().is_symlink());
         assert!(std::fs::read_to_string(&vero).unwrap().contains("attesa.py"));
         assert_eq!(std::fs::metadata(&vero).unwrap().permissions().mode() & 0o777, 0o600);
+        std::fs::remove_file(&file).unwrap();
+        // collegamento a un file che non esiste: si rifiuta e il collegamento resta
+        std::os::unix::fs::symlink(home.join("non-esiste/settings.json"), &file).unwrap();
+        assert!(attiva_hook_attese().is_err());
+        assert!(std::fs::symlink_metadata(&file).unwrap().file_type().is_symlink());
         std::fs::remove_file(&file).unwrap();
         // file illeggibile: non si tocca
         std::fs::write(&file, "{ rotto").unwrap();

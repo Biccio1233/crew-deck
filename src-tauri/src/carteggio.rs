@@ -173,13 +173,16 @@ pub fn nuova_sessione(agente: &str, cartella: &str, testo: &str) -> Result<Strin
     let file = std::env::temp_dir().join(format!("crew-deck-prompt-{}-{ns}.txt", std::process::id()));
     std::fs::write(&file, testo).map_err(|e| e.to_string())?;
     let eseguibile = match agente { "codex" => "codex", "pi" => "pi", _ => "claude" };
-    let comando = format!("{eseguibile} \"$(cat '{}')\"\n", file.display());
+    // la shell legge il prompt e cancella subito il file
+    let comando = format!("{eseguibile} \"$(cat '{f}'; rm -f '{f}')\"\n", f = file.display());
     let script = format!(
         "tell application \"Ghostty\"\n set cfg to new surface configuration\n set initial working directory of cfg to {}\n set initial input of cfg to {}\n if (count of windows) > 0 then\n new tab in front window with configuration cfg\n else\n new window with configuration cfg\n end if\n activate\nend tell",
         as_str(cartella),
         as_str(&comando)
     );
-    osascript(&script).map(|_| format!("Nuova sessione di {eseguibile} aperta in Ghostty"))
+    osascript(&script).map(|_| format!("Nuova sessione di {eseguibile} aperta in Ghostty")).inspect_err(|_| {
+        let _ = std::fs::remove_file(&file);
+    })
 }
 
 /// Riga messa in testa al primo messaggio di una sessione nuova quando è collegato un cervello centrale.
