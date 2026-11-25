@@ -62,6 +62,7 @@
   let rigaCervello = $state("");
   let conCervello = $state(true);
   let spiegaCervello = $state(false);
+  let creaIn = $state<string | null>(null);
   let timer: ReturnType<typeof setTimeout> | undefined;
   let tuttaRisposta = $state(false);
   let suggerimenti = $state<{ testo: string; perche: string }[] | null>(null);
@@ -84,8 +85,13 @@
     const c = await scegli("Cartella del cervello centrale");
     if (c) cervello = c;
   }
+  async function scegliDoveCreare() {
+    creaIn = await scegli("Dove creare il cervello centrale");
+  }
+  // la cartella scelta non basta: prima di aprire l'agente si chiede conferma, come per ogni invio
   async function creaCervello() {
-    const c = await scegli("Dove creare il cervello centrale");
+    const c = creaIn;
+    creaIn = null;
     if (!c) return;
     spiegaCervello = false;
     try { mostra(await invoke<string>("crea_cervello", { agente: agenteNuovo, cartella: c })); }
@@ -95,7 +101,8 @@
     const c = cervello;
     if (!c) { rigaCervello = ""; return; }
     if (anteprima) { rigaCervello = `Cervello centrale: ${c}. Prima di cominciare leggi le sue istruzioni. …\n\n`; return; }
-    invoke<string>("riga_cervello", { percorso: c }).then((r) => (rigaCervello = r)).catch(() => (rigaCervello = ""));
+    rigaCervello = "";
+    invoke<string>("riga_cervello", { percorso: c }).then((r) => { if (cervello === c) rigaCervello = r; }).catch(() => {});
   });
   const scelta = $derived(destinazione && destinazione !== "nuova" ? sessioni.find((s) => `${s.agente}:${s.id}` === destinazione) ?? null : null);
   // Domande che l'agente ha fatto nell'ultima risposta: le frasi che finiscono con «?».
@@ -185,8 +192,10 @@
   async function invia(conInvio: boolean) {
     conferma = false;
     try {
+      // la riga si ricalcola al momento dell'invio dal cervello attuale: mai quella di un cervello appena cambiato
+      const riga = rigaAttiva && !anteprima ? await invoke<string>("riga_cervello", { percorso: cervello }) : "";
       const msg = destinazione === "nuova"
-        ? await invoke<string>("nuova_sessione", { agente: agenteNuovo, cartella: cartellaNuova, testo: (rigaAttiva ? rigaCervello : "") + testo })
+        ? await invoke<string>("nuova_sessione", { agente: agenteNuovo, cartella: cartellaNuova, testo: riga + testo })
         : await invoke<string>("invia_prompt", { agente: scelta!.agente, id: scelta!.id, testo, invio: conInvio });
       mostra(msg);
     } catch (e) {
@@ -241,7 +250,12 @@
           <p>Un cervello centrale è una cartella di note che gli agenti leggono per conoscere i tuoi progetti, ricordare le decisioni prese e riprendere il lavoro senza perdere il contesto.</p>
           <p>Se lo colleghi, Crew Deck mette una sola riga in testa al primo messaggio di ogni sessione nuova: dice all'agente dove leggere le istruzioni, come creare il cervello del progetto se manca e dove annotare il lavoro fatto. Crew Deck non scrive file: lo fa l'agente, seguendo le regole del tuo cervello.</p>
           <p>Non ce l'hai? Puoi farne a meno, oppure fartene creare uno: scegli una cartella e un agente ti guida passo passo.</p>
-          <div class="azioni"><button class="sec" onclick={creaCervello}>Creane uno</button><button class="link" onclick={() => (spiegaCervello = false)}>Chiudi</button></div>
+          {#if creaIn}
+            <p>Apro una sessione di <strong>{agenteNuovo}</strong> in <span class="mono">{breve(creaIn)}</span> che crea lì un cervello centrale, guidandoti passo passo?</p>
+            <div class="azioni"><button class="pri" onclick={creaCervello}>Apri</button><button class="sec" onclick={() => (creaIn = null)}>Annulla</button></div>
+          {:else}
+            <div class="azioni"><button class="sec" onclick={scegliDoveCreare}>Creane uno</button><button class="link" onclick={() => (spiegaCervello = false)}>Chiudi</button></div>
+          {/if}
         </div>
       {/if}
       {#if cervello && rigaCervello}

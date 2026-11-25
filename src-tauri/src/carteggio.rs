@@ -197,10 +197,18 @@ pub fn richiesta_crea_cervello() -> String {
 pub fn scegli_cartella(titolo: &str) -> Result<Option<String>, String> {
     let script = format!("POSIX path of (choose folder with prompt {})", as_str(titolo));
     match osascript(&script) {
-        Ok(p) => Ok(Some(p.trim_end_matches('/').to_string()).filter(|p| !p.is_empty())),
+        Ok(p) => Ok(normalizza_cartella(&p)),
         Err(e) if e.contains("-128") => Ok(None),
         Err(e) => Err(e),
     }
+}
+
+/// Percorso restituito da `choose folder` senza la `/` finale; la radice resta `/`, il vuoto è nessuna scelta.
+fn normalizza_cartella(p: &str) -> Option<String> {
+    let p = p.trim();
+    if p.is_empty() { return None; }
+    let t = p.trim_end_matches('/');
+    Some(if t.is_empty() { "/".into() } else { t.into() })
 }
 
 /// Statistiche del registro dell'hook (solo numeri), degli ultimi `giorni`.
@@ -260,6 +268,13 @@ mod prova_cervello {
         let r = riga_cervello("/a/b c'd");
         assert!(r.starts_with("Cervello centrale: /a/b c'd. Prima di cominciare leggi le sue istruzioni."));
         assert!(r.ends_with("dove il cervello centrale indica.\n\n"));
+    }
+
+    #[test]
+    fn normalizza_cartella_tiene_la_radice() {
+        assert_eq!(normalizza_cartella("/"), Some("/".into()));
+        assert_eq!(normalizza_cartella("/Users/x/prova l'a/"), Some("/Users/x/prova l'a".into()));
+        assert_eq!(normalizza_cartella(""), None);
     }
 
     #[test]
