@@ -1,26 +1,29 @@
-# Nuova sessione: cartella a scelta e cervello facoltativo
+# Nuova sessione: cartella a scelta e cervello centrale facoltativo
 
-Data: 2026-11-25 · Piccola modifica · Approccio scelto da Fabrizio: 1 (riga in testa al primo messaggio).
+Data: 2026-11-25 · Progetto piccolo · Approvato da Fabrizio il 25/11.
 
 ## Perché
-Chiunque usi Crew Deck deve poter aprire una sessione nuova in qualsiasi cartella, anche in una che non esiste ancora. Chi tiene un «cervello» (una cartella con istruzioni e diario del lavoro, come `superbrain/_CERVELLO`) deve poterlo collegare, così la sessione nuova sa dove leggere il contesto e dove annotare cosa ha fatto. Chi non ce l'ha usa Crew Deck come oggi.
+Chiunque usi Crew Deck deve poter aprire una sessione nuova in qualsiasi cartella, anche nuova. Chi tiene un cervello centrale (una cartella con le regole e il diario del lavoro, per Fabrizio `superbrain/_CERVELLO`) lo collega, così ogni sessione nuova sa dove leggere il contesto, come creare il cervello locale se manca e dove annotare il lavoro. Le regole le decide il cervello centrale, non Crew Deck. Chi non ce l'ha usa Crew Deck come oggi, oppure se ne fa creare uno da un agente con una procedura guidata.
 
-## Obiettivi
-- Pulsante «Scegli…» accanto al menu delle cartelle: apre la finestra standard di macOS (`choose folder`, che ha già «Nuova cartella»). La cartella scelta entra in testa al menu e resta selezionata.
-- Cervello facoltativo: «Collega un cervello…» sceglie la cartella con la stessa finestra; Crew Deck la ricorda (localStorage `crewdeck.cervello`). Si può cambiare o togliere.
-- Con un cervello collegato, sotto le scelte compare la riga che verrà messa in testa al messaggio, con una casella per non aggiungerla a quella sessione. La conferma d'invio mostra che la riga c'è.
-- Riga: «Cervello di riferimento: <percorso>. Prima di cominciare leggi lì le istruzioni; a fine lavoro annota lì cosa hai fatto.»
+## Cosa si costruisce
+1. **Cartella di lavoro**: pulsante «Scegli…» accanto al menu delle cartelle in Nuova sessione. Apre la finestra di macOS (`choose folder`, che ha «Nuova cartella»). La cartella scelta va in testa al menu e resta selezionata.
+2. **Cervello centrale** (impostazione unica, localStorage `crewdeck.cervello`), con un «?» che apre una spiegazione breve: cos'è, perché serve agli agenti, cosa succede collegandolo. Si collega con la stessa finestra di macOS; si cambia o si toglie.
+3. **Riga in testa al primo messaggio** delle sessioni nuove, visibile sotto le scelte e con una casella per toglierla:
+   «Cervello centrale: <percorso>. Prima di cominciare leggi le sue istruzioni. Se questa cartella non ha un cervello locale, chiedi al cervello centrale come si crea e crealo. A fine lavoro annota cosa hai fatto dove il cervello centrale indica.»
+   La conferma d'invio dice che la riga c'è. Se la cartella ha un cervello locale lo controlla l'agente.
+4. **«Creane uno»** nella spiegazione del «?»: si sceglie una cartella e Crew Deck vi apre una sessione nuova con una richiesta pronta («crea un cervello centrale seguendo questo metodo, spiegami ogni passo e chiedimi ciò che serve») più il metodo incorporato nell'app (`giudice/metodo-cervello.md`), ricavato dalla sezione «Dentro un cervello» dello studio `studio-cervello-ai.md` di Fabrizio. Testo da far rileggere a Fabrizio prima del rilascio; segnato come prima versione.
 
 ## Non obiettivi
-- Crew Deck non scrive nel cervello né nei progetti e non tiene un diario suo.
-- Niente riga per le sessioni già aperte: il cervello vale solo per «Nuova sessione…».
-- Niente istruzione nascosta all'avvio dell'agente (approccio 2), niente file nel progetto (approccio 3).
+- Crew Deck non scrive file nel cervello né nei progetti: lo fa l'agente.
+- Un solo cervello centrale; più cervelli (per riservatezza) dopo, quando lo studio sarà definitivo.
+- Niente riga per le sessioni già aperte.
 
 ## Approcci considerati
-1. Riga in testa al primo messaggio — scelto: visibile, uguale per Claude, Codex e pi, minimo codice. Limite: in sessioni lunghe l'agente può perderla di vista.
-2. Istruzione nascosta all'avvio (`--append-system-prompt` per Claude, `-c` per Codex; per pi non c'è): valida per tutta la sessione, ma invisibile e diversa per agente. Si passa a questa se la 1 non basta.
-3. File nella cartella del progetto che rimanda al cervello: persistente, ma Crew Deck scriverebbe nei progetti altrui.
+1. Riga in testa al primo messaggio — scelto: visibile, uguale per Claude, Codex e pi.
+2. Istruzione nascosta all'avvio (`--append-system-prompt`, `-c` di Codex; per pi non c'è): invisibile e diversa per agente. Di riserva.
+3. File scritto da Crew Deck nella cartella del progetto: Crew Deck scriverebbe nei progetti altrui. Scartato.
+Per la creazione: procedura fatta dall'agente (scelta) invece di Crew Deck che crea le cartelle da sé, che fisserebbe uno schema senza spiegare.
 
 ## Scelte mie (correggibili)
 - Comando Tauri `scegli_cartella(titolo)` con `osascript choose folder`; Annulla → nessun cambio. Nessuna dipendenza nuova.
-- Un'unica casella «Aggiungi il cervello» per invio, accesa di default.
+- Il metodo per «Creane uno» viaggia come il prompt: file temporaneo letto dal comando di avvio, come oggi in `nuova_sessione`.
