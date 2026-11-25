@@ -1,6 +1,6 @@
 //! Trova i registri dei tre agenti e li tiene aggiornati in memoria.
 use crate::adapters::Lettore;
-use crate::engine::{calcola, ruolo, Calcolo, Opzioni, Ruolo};
+use crate::engine::{applica_attesa, calcola, ruolo, Calcolo, Opzioni, Ruolo};
 use crate::localizza::{localizza, Cercata, Posizione};
 use crate::model::{Agente, Token};
 use serde::Serialize;
@@ -51,6 +51,8 @@ pub struct Scanner {
     file_chiuse: Option<PathBuf>,
     /// Si guardano solo i file toccati negli ultimi N giorni.
     finestra: Duration,
+    /// Segnali «ti aspetta» scritti dall'hook di Claude Code (~/.crew-deck/attese/<sessione>); None nei test.
+    pub cartella_attese: Option<PathBuf>,
 }
 
 impl Scanner {
@@ -68,11 +70,12 @@ impl Scanner {
             chiuse: carica_chiuse(&home.join(".crew-deck/chiuse.json")),
             file_chiuse: Some(home.join(".crew-deck/chiuse.json")),
             finestra: Duration::from_secs(3 * 24 * 3600),
+            cartella_attese: Some(home.join(".crew-deck/attese")),
         }
     }
 
     pub fn con_radici(radici: Vec<(Agente, PathBuf)>, finestra: Duration) -> Self {
-        Scanner { radici, lettori: HashMap::new(), posizioni: HashMap::new(), ultima_app: HashMap::new(), localizzato: None, chiuse: HashMap::new(), file_chiuse: None, finestra }
+        Scanner { radici, lettori: HashMap::new(), posizioni: HashMap::new(), ultima_app: HashMap::new(), localizzato: None, chiuse: HashMap::new(), file_chiuse: None, finestra, cartella_attese: None }
     }
 
     /// Cerca file nuovi e legge le code dei file già noti.
@@ -150,6 +153,7 @@ impl Scanner {
 
     pub fn viste(&self, ora: i64) -> Vec<Vista> {
         let o = Opzioni::default();
+        let attese = leggi_attese(self.cartella_attese.as_deref());
         let mut v: Vec<Vista> = self
             .lettori
             .values()
@@ -193,6 +197,9 @@ impl Scanner {
                             c.stimato = false;
                             c.azione = "Aperta, pronta per un nuovo compito".into();
                         }
+                        if let Some((motivo, segnale)) = attese.get(&a.id).filter(|_| a.agente == Agente::Claude) {
+                            applica_attesa(&mut c, motivo, *segnale, mtime_ms(&a.file), self.posizioni.contains_key(&k), ora, &o);
+                        }
                         c
                     },
                 }
@@ -201,6 +208,34 @@ impl Scanner {
         v.sort_by(|a, b| b.ultima_attivita.cmp(&a.ultima_attivita));
         v
     }
+}
+
+fn mtime_ms(p: &Path) -> i64 {
+    std::fs::metadata(p)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+/// sessione → (motivo, quando): un file per sessione, contenuto «domanda» o «permesso».
+fn leggi_attese(dir: Option<&Path>) -> HashMap<String, (String, i64)> {
+    let mut m = HashMap::new();
+    let Some(Ok(rd)) = dir.map(std::fs::read_dir) else { return m };
+    for e in rd.flatten() {
+        let p = e.path();
+        let quando = mtime_ms(&p);
+        // un segnale per sessione, scritto dall'hook: dopo due giorni non serve più
+        if crate::ora_ms() - quando > 2 * 24 * 3_600_000 {
+            let _ = std::fs::remove_file(&p);
+            continue;
+        }
+        if let (Some(id), Ok(motivo)) = (p.file_name().and_then(|n| n.to_str()), std::fs::read_to_string(&p)) {
+            m.insert(id.to_string(), (motivo.trim().to_string(), quando));
+        }
+    }
+    m
 }
 
 fn raccogli(dir: &Path, out: &mut Vec<PathBuf>, prof: u8) {

@@ -18,6 +18,52 @@ pub fn ora_ms() -> i64 {
 
 pub struct Plancia(pub Mutex<Scanner>);
 
+const ATTESA: &str = include_str!("../../giudice/attesa.py");
+
+/// L'hook d'attesa (`giudice/attesa.py`) è già nelle impostazioni di Claude Code? None se Claude Code non c'è.
+#[tauri::command]
+fn hook_attese() -> Option<bool> {
+    let home = dirs::home_dir()?;
+    if !home.join(".claude").is_dir() {
+        return None;
+    }
+    Some(std::fs::read_to_string(home.join(".claude/settings.json")).map(|t| t.contains("attesa.py")).unwrap_or(false))
+}
+
+/// Su richiesta: copia l'hook in ~/.crew-deck/attesa.py e lo aggiunge a ~/.claude/settings.json, dopo una copia di sicurezza.
+#[tauri::command]
+fn attiva_hook_attese() -> Result<String, String> {
+    let home = dirs::home_dir().ok_or("cartella home non trovata")?;
+    let script = home.join(".crew-deck/attesa.py");
+    // il percorso finisce tra virgolette in un comando di shell: niente caratteri che la shell interpreterebbe
+    if script.to_string_lossy().contains(['"', '$', '`', '\\']) {
+        return Err("il percorso della cartella home contiene caratteri speciali: attivazione automatica non possibile".into());
+    }
+    std::fs::create_dir_all(home.join(".crew-deck")).map_err(|e| e.to_string())?;
+    std::fs::write(&script, ATTESA).map_err(|e| e.to_string())?;
+    let file = home.join(".claude/settings.json");
+    let testo = std::fs::read_to_string(&file).unwrap_or_else(|_| "{}".into());
+    if testo.contains("attesa.py") {
+        return Ok("Già attivo".into());
+    }
+    let mut cfg: serde_json::Value = serde_json::from_str(&testo).map_err(|_| "settings.json di Claude Code non è leggibile: non lo tocco")?;
+    if file.exists() {
+        let copia = home.join(format!(".claude/settings.json.bak-crewdeck-{}", ora_ms()));
+        std::fs::copy(&file, &copia).map_err(|e| e.to_string())?;
+    }
+    let voce = |matcher: &str, motivo: &str| {
+        serde_json::json!({"matcher": matcher, "hooks": [{"type": "command", "timeout": 5,
+            "command": format!("python3 \"{}\" {motivo} 2>/dev/null || true", script.display())}]})
+    };
+    let hooks = cfg.as_object_mut().ok_or("settings.json non è un oggetto")?.entry("hooks").or_insert(serde_json::json!({}));
+    for (evento, v) in [("PreToolUse", voce("AskUserQuestion", "domanda")), ("Notification", voce("permission_prompt", "permesso"))] {
+        let lista = hooks.as_object_mut().ok_or("hooks non è un oggetto")?.entry(evento).or_insert(serde_json::json!([]));
+        lista.as_array_mut().ok_or("formato di hooks inatteso")?.push(v);
+    }
+    std::fs::write(&file, serde_json::to_string_pretty(&cfg).unwrap() + "\n").map_err(|e| e.to_string())?;
+    Ok("Attivato: vale per le sessioni di Claude Code aperte da adesso".into())
+}
+
 /// Elenco delle sessioni con lo stato calcolato adesso.
 #[tauri::command]
 fn sessioni(plancia: tauri::State<Plancia>) -> Vec<Vista> {
@@ -176,7 +222,7 @@ pub fn run() {
             });
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![sessioni, apri_sessione, giudica_prompt, riscrivi_prompt, suggerisci_risposta, invia_prompt, nuova_sessione, chiudi_sessione, stato_cmux, debriefing])
+        .invoke_handler(tauri::generate_handler![sessioni, apri_sessione, giudica_prompt, riscrivi_prompt, suggerisci_risposta, invia_prompt, nuova_sessione, chiudi_sessione, stato_cmux, debriefing, hook_attese, attiva_hook_attese])
         .run(tauri::generate_context!())
         .expect("errore all'avvio di Crew Deck");
 }
@@ -213,4 +259,35 @@ fn menu_italiano<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<
         &P::close_window(app, Some("Chiudi finestra"))?,
     ])?;
     Menu::with_items(app, &[&app_menu, &modifica, &vista, &finestra])
+}
+
+#[cfg(test)]
+mod prova_hook {
+    use super::*;
+
+    #[test]
+    fn attiva_hook_attese_su_home_finta() {
+        let home = std::env::temp_dir().join(format!("crewdeck-hook-{}", ora_ms()));
+        std::fs::create_dir_all(home.join(".claude")).unwrap();
+        // unico test che cambia HOME, nel suo modulo
+        unsafe { std::env::set_var("HOME", &home) };
+        let file = home.join(".claude/settings.json");
+        std::fs::write(&file, r#"{"model":"x","hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[]}]}}"#).unwrap();
+        assert_eq!(hook_attese(), Some(false));
+        attiva_hook_attese().unwrap();
+        let cfg: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+        assert_eq!(cfg["model"], "x");
+        assert_eq!(cfg["hooks"]["PreToolUse"].as_array().unwrap().len(), 2);
+        assert_eq!(cfg["hooks"]["Notification"][0]["matcher"], "permission_prompt");
+        assert!(home.join(".crew-deck/attesa.py").exists());
+        let copie = std::fs::read_dir(home.join(".claude")).unwrap().filter(|e| e.as_ref().unwrap().file_name().to_string_lossy().contains("bak-crewdeck")).count();
+        assert_eq!(copie, 1);
+        assert_eq!(hook_attese(), Some(true));
+        assert_eq!(attiva_hook_attese().unwrap(), "Già attivo");
+        // file illeggibile: non si tocca
+        std::fs::write(&file, "{ rotto").unwrap();
+        assert!(attiva_hook_attese().is_err());
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "{ rotto");
+        std::fs::remove_dir_all(&home).ok();
+    }
 }

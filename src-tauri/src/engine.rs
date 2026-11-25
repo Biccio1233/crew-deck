@@ -19,6 +19,8 @@ pub enum Stato {
 #[serde(rename_all = "kebab-case")]
 pub enum Motivo {
     Domanda,
+    /// richiesta di permesso segnalata dall'hook di Claude Code (certa)
+    Permesso,
     PermessoStimato,
     Strumento,
     Pensa,
@@ -58,6 +60,21 @@ impl Default for Opzioni {
     fn default() -> Self {
         Opzioni { inattivo_dopo_ms: 30 * 60_000, soglia_permesso_ms: 10_000, pensa_max_ms: 10 * 60_000 }
     }
+}
+
+/// Segnale dell'hook `giudice/attesa.py`: Claude Code scrive la domanda nel registro solo dopo la risposta,
+/// quindi «ti aspetta» arriva dall'hook. Vale finché il registro non si muove dopo il segnale
+/// (tolleranza 2 s) e, a sessione chiusa, al massimo per il tempo di «in porto» × 4.
+pub fn applica_attesa(c: &mut Calcolo, motivo: &str, segnale_ms: i64, registro_ms: i64, viva: bool, ora: i64, o: &Opzioni) {
+    if registro_ms > segnale_ms + 2_000 || (!viva && ora - segnale_ms >= o.inattivo_dopo_ms * 4) {
+        return;
+    }
+    let (m, azione) = match motivo {
+        "domanda" => (Motivo::Domanda, "Ti fa una domanda".to_string()),
+        "permesso" => (Motivo::Permesso, format!("Chiede il permesso: {}", c.azione.trim_start_matches("Forse chiede il permesso: "))),
+        _ => return,
+    };
+    *c = Calcolo { stato: Stato::Aspetta, motivo: m, stimato: false, da_quando: segnale_ms, azione };
 }
 
 /// Strumenti che possono durare a lungo da soli: se sono fermi non vuol dire che chiedono un permesso.

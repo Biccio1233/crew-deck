@@ -1,7 +1,7 @@
 //! Un test per ogni regola del motore di stato, sui tre formati di registro.
 use crew_deck_lib::adapters::feed;
 use crew_deck_lib::adapters::codex::cmd_da_script;
-use crew_deck_lib::engine::{calcola, ruolo, Motivo, Opzioni, Ruolo, Stato};
+use crew_deck_lib::engine::{applica_attesa, calcola, ruolo, Motivo, Opzioni, Ruolo, Stato};
 use crew_deck_lib::model::{Acc, Agente};
 use serde_json::{json, Value};
 use std::path::PathBuf;
@@ -60,6 +60,32 @@ fn claude_strumento_veloce_fermo_chiede_permesso_stimato() {
 fn claude_domanda_aspetta_te() {
     let a = acc(Agente::Claude, &[c_user(0, "scegli"), c_tool(1, "q1", "AskUserQuestion", json!({}))]);
     assert_eq!(stato_a(&a, 600), (Stato::Aspetta, Motivo::Domanda, false));
+}
+
+#[test]
+fn claude_domanda_dall_hook_mentre_il_registro_tace() {
+    // Claude Code 2.1.332 scrive l'AskUserQuestion nel registro solo dopo la risposta: il registro mostra «Pensa…»
+    let a = acc(Agente::Claude, &[c_user(0, "scegli")]);
+    let o = Opzioni::default();
+    let ms = |s: i64| T0 + s * 1000;
+    let mut c = calcola(&a, ms(30), &o);
+    assert_eq!(c.stato, Stato::Lavora);
+    applica_attesa(&mut c, "domanda", ms(2), ms(1), true, ms(30), &o);
+    assert_eq!((c.stato, c.motivo, c.stimato), (Stato::Aspetta, Motivo::Domanda, false));
+    // permesso: certo, con l'azione dello strumento
+    let b = acc(Agente::Claude, &[c_user(0, "modifica"), c_tool(1, "t1", "Edit", json!({"file_path":"/p/app.ts"}))]);
+    let mut c = calcola(&b, ms(3), &o);
+    applica_attesa(&mut c, "permesso", ms(2), ms(1), true, ms(3), &o);
+    assert_eq!((c.stato, c.motivo, c.stimato), (Stato::Aspetta, Motivo::Permesso, false));
+    assert!(c.azione.starts_with("Chiede il permesso: ") && !c.azione.contains("Forse"));
+    // il registro si è mosso dopo il segnale (risposta data): il segnale non vale più
+    let mut c = calcola(&a, ms(30), &o);
+    applica_attesa(&mut c, "domanda", ms(2), ms(10), true, ms(30), &o);
+    assert_eq!(c.stato, Stato::Lavora);
+    // sessione chiusa con un segnale vecchio: non resta «ti aspettano» per sempre
+    let mut c = calcola(&a, ms(1_000_000), &o);
+    applica_attesa(&mut c, "domanda", ms(2), ms(1), false, ms(1_000_000), &o);
+    assert_ne!(c.stato, Stato::Aspetta);
 }
 
 #[test]

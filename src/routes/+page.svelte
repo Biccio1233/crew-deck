@@ -128,6 +128,20 @@
     }
   }
 
+  // null: Claude Code assente o già attivo, o rimandato da chi usa l'app
+  let hookAttese = $state<boolean | null>(null);
+  let hookRimandato = $state(localStorage.getItem("hook-attese-rimandato") === "1");
+  async function attivaHook() {
+    try {
+      esito = { testo: await invoke<string>("attiva_hook_attese"), errore: false };
+      hookAttese = true;
+    } catch (e) {
+      esito = { testo: String(e), errore: true };
+    }
+    clearTimeout(timerEsito);
+    timerEsito = setTimeout(() => (esito = null), 6000);
+  }
+
   onMount(() => {
     // anteprima nel browser (senza Tauri): legge un file di esempio
     if (!("__TAURI_INTERNALS__" in window)) {
@@ -135,6 +149,7 @@
       const t = setInterval(() => (ora = Date.now()), 1000);
       return () => clearInterval(t);
     }
+    invoke<boolean | null>("hook_attese").then((v) => (hookAttese = v)).catch(() => {});
     invoke<Vista[]>("sessioni").then((v) => { sessioni = v; caricato = true; }).catch(() => (caricato = true));
     const stop = listen<Vista[]>("sessioni", (e) => { sessioni = e.payload; caricato = true; });
     const t = setInterval(() => (ora = Date.now()), 1000);
@@ -188,6 +203,13 @@
     </div>
 
     </div>
+    {#if hookAttese === false && !hookRimandato}
+      <div class="invito">
+        <p>Claude Code scrive le sue domande nel registro solo dopo la tua risposta: per vedere subito chi ti aspetta, attiva l'avviso di Crew Deck nelle impostazioni di Claude Code (ne faccio prima una copia).</p>
+        <button class="pri" onclick={attivaHook}>Attiva</button>
+        <button class="sec" onclick={() => { hookRimandato = true; localStorage.setItem("hook-attese-rimandato", "1"); }}>Non ora</button>
+      </div>
+    {/if}
     {#if !caricato}
       <div class="scheletro">{#each [1, 2, 3] as _}<div class="riga-s"></div>{/each}</div>
     {:else if sezioni.length === 0}
@@ -454,6 +476,14 @@
     padding: 8px 14px; border-radius: 8px; background: var(--pannello); border: 1px solid var(--bordo);
     color: var(--testo); box-shadow: 0 6px 24px oklch(0 0 0 / 0.25); animation: apri 200ms cubic-bezier(0.22, 1, 0.36, 1);
   }
+  .invito {
+    display: flex; gap: 10px; align-items: center; margin: 8px 16px; padding: 10px 14px; border-radius: 8px;
+    background: var(--tinta-aspetta); border: 1px solid var(--bordo);
+  }
+  .invito p { margin: 0; flex: 1; color: var(--testo-2); }
+  .invito button { border-radius: 6px; padding: 6px 12px; cursor: pointer; white-space: nowrap; }
+  .invito .pri { background: var(--testo); color: var(--bg); border: 1px solid var(--testo); font-weight: 600; }
+  .invito .sec { background: transparent; color: var(--testo-2); border: 1px solid var(--bordo); }
   .esito.errore { border-color: var(--c-aspetta); }
   li:last-child { border-bottom: 1px solid var(--bordo); }
   section.aspetta li { background: var(--tinta-aspetta); }
