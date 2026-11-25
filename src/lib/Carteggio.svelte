@@ -262,8 +262,8 @@
           {/if}
         </div>
       {/if}
-      {#if cervello && rigaCervello}
-        <label class="riga-cervello"><input type="checkbox" bind:checked={conCervello} /> In testa al messaggio: <span class="tenue">«{rigaCervello.trim()}»</span></label>
+      {#if cervello}
+        <label class="riga-cervello"><input type="checkbox" bind:checked={conCervello} /> In testa al messaggio: <span class="tenue">{rigaCervello ? `«${rigaCervello.trim()}»` : "la riga del cervello centrale…"}</span></label>
       {/if}
     {/if}
 
