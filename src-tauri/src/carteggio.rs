@@ -168,7 +168,9 @@ pub fn invia(pos: &Posizione, testo: &str, invio: bool) -> Result<String, String
 
 /// Apre una sessione nuova in Ghostty nella cartella, con l'agente già avviato sul prompt.
 pub fn nuova_sessione(agente: &str, cartella: &str, testo: &str) -> Result<String, String> {
-    let file = std::env::temp_dir().join(format!("crew-deck-prompt-{}.txt", std::process::id()));
+    // un file per ogni avvio: due avvii ravvicinati non devono scambiarsi il prompt
+    let ns = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+    let file = std::env::temp_dir().join(format!("crew-deck-prompt-{}-{ns}.txt", std::process::id()));
     std::fs::write(&file, testo).map_err(|e| e.to_string())?;
     let eseguibile = match agente { "codex" => "codex", "pi" => "pi", _ => "claude" };
     let comando = format!("{eseguibile} \"$(cat '{}')\"\n", file.display());

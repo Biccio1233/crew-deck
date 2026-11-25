@@ -18,7 +18,7 @@
 
 ## Review Focus
 - Annulla nella finestra di scelta → nessun cambiamento, nessun errore mostrato.
-- Percorso con virgolette, apostrofi o spazi (es. `Fabrizio Palai/superbrain`) → riga e cartella corrette (AppleScript con `as_str`, prompt via file temporaneo).
+- Percorso con virgolette, apostrofi o spazi (es. `Mario Rossi/l'archivio "note"`) → riga e cartella corrette (AppleScript con `as_str`, prompt via file temporaneo).
 - Cervello collegato ma casella tolta → il messaggio parte senza riga.
 - Cartella del cervello cancellata dopo il collegamento → la riga parte lo stesso; l'agente se ne accorge (nessun controllo in Crew Deck, scelta voluta).
 - Invio a una sessione già aperta → mai la riga.
@@ -29,7 +29,7 @@
 
 **Files:**
 - Modify: `src-tauri/src/carteggio.rs` (dopo `nuova_sessione`)
-- Create: `giudice/metodo-cervello.md` (metodo dalla sezione «Dentro un cervello» di `~/Desktop/0. pjt/studio-cervello-ai.md`, ridotto, prima versione)
+- Create: `giudice/metodo-cervello.md` (metodo dalla sezione «Dentro un cervello» di `studio di metodo dell'autore (non nel repo)`, ridotto, prima versione)
 - Modify: `src-tauri/src/lib.rs` (comandi + invoke_handler)
 
 **Interfaces — Produces:**
