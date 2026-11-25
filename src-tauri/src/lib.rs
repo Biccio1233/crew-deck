@@ -28,17 +28,23 @@ fn hook_attese() -> Option<bool> {
         return None;
     }
     let cfg = std::fs::read_to_string(home.join(".claude/settings.json")).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(serde_json::json!({}));
-    Some(VOCI_ATTESA.iter().all(|(evento, _, motivo)| ha_voce(&cfg, evento, motivo)))
+    Some(VOCI_ATTESA.iter().all(|(evento, matcher, motivo)| ha_voce(&cfg, evento, matcher, motivo)))
 }
 
 /// Le voci dell'hook d'attesa: evento di Claude Code, matcher, motivo passato ad attesa.py.
 /// «fine» (Stop) cancella il segnale quando Claude ha finito di rispondere.
 const VOCI_ATTESA: [(&str, &str, &str); 3] = [("PreToolUse", "AskUserQuestion", "domanda"), ("Notification", "permission_prompt", "permesso"), ("Stop", "", "fine")];
 
-/// C'è già, sotto `evento`, un comando di attesa.py con questo motivo?
-fn ha_voce(cfg: &serde_json::Value, evento: &str, motivo: &str) -> bool {
-    let cerca = format!("attesa.py\" {motivo}");
-    cfg["hooks"][evento].as_array().is_some_and(|l| l.iter().any(|v| v["hooks"].as_array().is_some_and(|h| h.iter().any(|c| c["command"].as_str().is_some_and(|t| t.contains(&cerca))))))
+/// C'è già, sotto `evento` e con lo stesso matcher, un comando di attesa.py con questo motivo?
+/// Per Stop il matcher non conta (Claude Code lo ignora).
+fn ha_voce(cfg: &serde_json::Value, evento: &str, matcher: &str, motivo: &str) -> bool {
+    let cerca = format!("attesa.py\" {motivo} ");
+    cfg["hooks"][evento].as_array().is_some_and(|l| {
+        l.iter().any(|v| {
+            (matcher.is_empty() || v["matcher"].as_str() == Some(matcher))
+                && v["hooks"].as_array().is_some_and(|h| h.iter().any(|c| c["command"].as_str().is_some_and(|t| format!("{t} ").contains(&cerca))))
+        })
+    })
 }
 
 /// Su richiesta: copia l'hook in ~/.crew-deck/attesa.py e lo aggiunge a ~/.claude/settings.json, dopo una copia di sicurezza.
@@ -55,7 +61,7 @@ fn attiva_hook_attese() -> Result<String, String> {
     let file = home.join(".claude/settings.json");
     let testo = std::fs::read_to_string(&file).unwrap_or_else(|_| "{}".into());
     let mut cfg: serde_json::Value = serde_json::from_str(&testo).map_err(|_| "settings.json di Claude Code non è leggibile: non lo tocco")?;
-    let mancanti: Vec<_> = VOCI_ATTESA.iter().filter(|(evento, _, motivo)| !ha_voce(&cfg, evento, motivo)).collect();
+    let mancanti: Vec<_> = VOCI_ATTESA.iter().filter(|(evento, matcher, motivo)| !ha_voce(&cfg, evento, matcher, motivo)).collect();
     if mancanti.is_empty() {
         return Ok("Già attivo".into());
     }
@@ -72,10 +78,21 @@ fn attiva_hook_attese() -> Result<String, String> {
         let lista = hooks.as_object_mut().ok_or("hooks non è un oggetto")?.entry(*evento).or_insert(serde_json::json!([]));
         lista.as_array_mut().ok_or("formato di hooks inatteso")?.push(voce(matcher, motivo));
     }
-    // scrittura atomica: file accanto, poi rinomina; un'interruzione non lascia mai settings.json a metà
-    let temp = home.join(format!(".claude/settings.json.tmp-crewdeck-{}", ora_ms()));
-    std::fs::write(&temp, serde_json::to_string_pretty(&cfg).unwrap() + "\n").map_err(|e| e.to_string())?;
-    std::fs::rename(&temp, &file).map_err(|e| { let _ = std::fs::remove_file(&temp); e.to_string() })?;
+    // scrittura atomica: file accanto, poi rinomina; un'interruzione non lascia mai settings.json a metà.
+    // Se settings.json è un collegamento, si sostituisce il file a cui punta; i permessi restano quelli di prima.
+    let bersaglio = std::fs::canonicalize(&file).unwrap_or_else(|_| file.clone());
+    let cartella = bersaglio.parent().ok_or("cartella di settings.json non trovata")?;
+    let temp = cartella.join(format!(".settings.json.tmp-crewdeck-{}", ora_ms()));
+    let scrivi = || -> std::io::Result<()> {
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut f = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&temp)?;
+        std::io::Write::write_all(&mut f, (serde_json::to_string_pretty(&cfg).unwrap() + "\n").as_bytes())?;
+        if let Ok(m) = std::fs::metadata(&bersaglio) {
+            std::fs::set_permissions(&temp, m.permissions())?;
+        }
+        std::fs::rename(&temp, &bersaglio)
+    };
+    scrivi().map_err(|e| { let _ = std::fs::remove_file(&temp); e.to_string() })?;
     Ok("Attivato: vale per le sessioni di Claude Code aperte da adesso".into())
 }
 
@@ -329,6 +346,24 @@ mod prova_hook {
         assert_eq!(cfg["hooks"]["Notification"].as_array().unwrap().len(), 1);
         assert_eq!(cfg["hooks"]["Stop"].as_array().unwrap().len(), 1);
         assert_eq!(hook_attese(), Some(true));
+        // voce con il matcher sbagliato: non conta, si aggiunge quella giusta
+        std::fs::write(&file, r#"{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"python3 \"/x/attesa.py\" domanda"}]}]}}"#).unwrap();
+        assert_eq!(hook_attese(), Some(false));
+        attiva_hook_attese().unwrap();
+        let cfg: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+        assert_eq!(cfg["hooks"]["PreToolUse"][1]["matcher"], "AskUserQuestion");
+        // collegamento a un altro file con permessi 0600: resta un collegamento, il bersaglio tiene i permessi
+        use std::os::unix::fs::PermissionsExt;
+        let vero = home.join("dotfiles-settings.json");
+        std::fs::write(&vero, "{}").unwrap();
+        std::fs::set_permissions(&vero, std::fs::Permissions::from_mode(0o600)).unwrap();
+        std::fs::remove_file(&file).unwrap();
+        std::os::unix::fs::symlink(&vero, &file).unwrap();
+        attiva_hook_attese().unwrap();
+        assert!(std::fs::symlink_metadata(&file).unwrap().file_type().is_symlink());
+        assert!(std::fs::read_to_string(&vero).unwrap().contains("attesa.py"));
+        assert_eq!(std::fs::metadata(&vero).unwrap().permissions().mode() & 0o777, 0o600);
+        std::fs::remove_file(&file).unwrap();
         // file illeggibile: non si tocca
         std::fs::write(&file, "{ rotto").unwrap();
         assert!(attiva_hook_attese().is_err());
