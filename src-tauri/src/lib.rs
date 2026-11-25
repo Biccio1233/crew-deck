@@ -155,6 +155,24 @@ async fn nuova_sessione(agente: String, cartella: String, testo: String) -> Resu
     tauri::async_runtime::spawn_blocking(move || carteggio::nuova_sessione(&agente, &cartella, &testo)).await.map_err(|e| e.to_string())?
 }
 
+/// Finestra di macOS per scegliere una cartella (None se annullata).
+#[tauri::command]
+async fn scegli_cartella(titolo: String) -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || carteggio::scegli_cartella(&titolo)).await.map_err(|e| e.to_string())?
+}
+
+/// Riga del cervello centrale da mettere in testa al primo messaggio.
+#[tauri::command]
+fn riga_cervello(percorso: String) -> String {
+    carteggio::riga_cervello(&percorso)
+}
+
+/// «Creane uno»: apre una sessione nuova nella cartella con la procedura guidata.
+#[tauri::command]
+async fn crea_cervello(agente: String, cartella: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || carteggio::nuova_sessione(&agente, &cartella, &carteggio::richiesta_crea_cervello())).await.map_err(|e| e.to_string())?
+}
+
 /// Chiude la sessione nella vista (o la ripristina). Non tocca i file della sessione.
 #[tauri::command]
 fn chiudi_sessione(plancia: tauri::State<Plancia>, agente: String, id: String, ripristina: Option<bool>) -> Result<(), String> {
@@ -222,7 +240,7 @@ pub fn run() {
             });
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![sessioni, apri_sessione, giudica_prompt, riscrivi_prompt, suggerisci_risposta, invia_prompt, nuova_sessione, chiudi_sessione, stato_cmux, debriefing, hook_attese, attiva_hook_attese])
+        .invoke_handler(tauri::generate_handler![sessioni, apri_sessione, giudica_prompt, riscrivi_prompt, suggerisci_risposta, invia_prompt, nuova_sessione, scegli_cartella, riga_cervello, crea_cervello, chiudi_sessione, stato_cmux, debriefing, hook_attese, attiva_hook_attese])
         .run(tauri::generate_context!())
         .expect("errore all'avvio di Crew Deck");
 }

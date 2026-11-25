@@ -56,6 +56,12 @@
   let esito = $state<{ testo: string; errore: boolean } | null>(null);
   let agenteNuovo = $state<"claude" | "codex" | "pi">("claude");
   let cartellaNuova = $state("");
+  let cartelleScelte = $state<string[]>([]);
+  // Cervello centrale facoltativo: Crew Deck mette solo una riga in testa al primo messaggio, non scrive file.
+  let cervello = $state("");
+  let rigaCervello = $state("");
+  let conCervello = $state(true);
+  let spiegaCervello = $state(false);
   let timer: ReturnType<typeof setTimeout> | undefined;
   let tuttaRisposta = $state(false);
   let suggerimenti = $state<{ testo: string; perche: string }[] | null>(null);
@@ -63,7 +69,34 @@
   let ultimoGiudicato = "";
 
   const aperte = $derived(sessioni.filter((s) => s.posizione && !s.id.startsWith("_")));
-  const cartelle = $derived([...new Set(sessioni.map((s) => s.cartella).filter((c): c is string => !!c))].slice(0, 30));
+  const cartelle = $derived([...new Set([...cartelleScelte, ...sessioni.map((s) => s.cartella).filter((c): c is string => !!c)])].slice(0, 30));
+  const breve = (p: string) => p.replace(/^\/Users\/[^/]+/, "~");
+  const rigaAttiva = $derived(destinazione === "nuova" && !!cervello && conCervello && !!rigaCervello);
+  async function scegli(titolo: string): Promise<string | null> {
+    try { return await invoke<string | null>("scegli_cartella", { titolo }); }
+    catch (e) { mostra(String(e), true); return null; }
+  }
+  async function scegliCartella() {
+    const c = await scegli("Cartella di lavoro");
+    if (c) { cartelleScelte = [c, ...cartelleScelte.filter((x) => x !== c)]; cartellaNuova = c; }
+  }
+  async function collegaCervello() {
+    const c = await scegli("Cartella del cervello centrale");
+    if (c) cervello = c;
+  }
+  async function creaCervello() {
+    const c = await scegli("Dove creare il cervello centrale");
+    if (!c) return;
+    spiegaCervello = false;
+    try { mostra(await invoke<string>("crea_cervello", { agente: agenteNuovo, cartella: c })); }
+    catch (e) { mostra(String(e), true); }
+  }
+  $effect(() => {
+    const c = cervello;
+    if (!c) { rigaCervello = ""; return; }
+    if (anteprima) { rigaCervello = `Cervello centrale: ${c}. Prima di cominciare leggi le sue istruzioni. …\n\n`; return; }
+    invoke<string>("riga_cervello", { percorso: c }).then((r) => (rigaCervello = r)).catch(() => (rigaCervello = ""));
+  });
   const scelta = $derived(destinazione && destinazione !== "nuova" ? sessioni.find((s) => `${s.agente}:${s.id}` === destinazione) ?? null : null);
   // Domande che l'agente ha fatto nell'ultima risposta: le frasi che finiscono con «?».
   const domandeAgente = $derived.by(() => {
@@ -153,7 +186,7 @@
     conferma = false;
     try {
       const msg = destinazione === "nuova"
-        ? await invoke<string>("nuova_sessione", { agente: agenteNuovo, cartella: cartellaNuova, testo })
+        ? await invoke<string>("nuova_sessione", { agente: agenteNuovo, cartella: cartellaNuova, testo: (rigaAttiva ? rigaCervello : "") + testo })
         : await invoke<string>("invia_prompt", { agente: scelta!.agente, id: scelta!.id, testo, invio: conInvio });
       mostra(msg);
     } catch (e) {
@@ -165,8 +198,10 @@
     jev = localStorage.getItem("crewdeck.jev") !== "0";
     if (!destinazione) destinazione = aperte[0] ? `${aperte[0].agente}:${aperte[0].id}` : "nuova";
     if (!cartellaNuova && cartelle[0]) cartellaNuova = cartelle[0];
+    cervello = localStorage.getItem("crewdeck.cervello") ?? "";
   });
   $effect(() => localStorage.setItem("crewdeck.jev", jev ? "1" : "0"));
+  $effect(() => { if (cervello) localStorage.setItem("crewdeck.cervello", cervello); else localStorage.removeItem("crewdeck.cervello"); });
 </script>
 
 <div class="carteggio">
@@ -186,10 +221,33 @@
       {#if destinazione === "nuova"}
         <select bind:value={agenteNuovo} aria-label="Agente"><option value="claude">Claude Code</option><option value="codex">Codex</option><option value="pi">pi</option></select>
         <select bind:value={cartellaNuova} aria-label="Cartella" class="cartella">
-          {#each cartelle as c}<option value={c}>{c.replace(/^\/Users\/[^/]+/, "~")}</option>{/each}
+          {#each cartelle as c}<option value={c}>{breve(c)}</option>{/each}
         </select>
+        <button class="sec" onclick={scegliCartella}>Scegli…</button>
       {/if}
     </div>
+    {#if destinazione === "nuova"}
+      <div class="cervello">
+        <span class="etichetta">Cervello centrale <button class="interr-btn" aria-label="Cos'è il cervello centrale?" aria-expanded={spiegaCervello} onclick={() => (spiegaCervello = !spiegaCervello)}>?</button></span>
+        {#if cervello}
+          <span class="mono">{breve(cervello)}</span>
+          <button class="link" onclick={collegaCervello}>Cambia</button> · <button class="link" onclick={() => (cervello = "")}>Togli</button>
+        {:else}
+          <button class="link" onclick={collegaCervello}>Collega…</button>
+        {/if}
+      </div>
+      {#if spiegaCervello}
+        <div class="spiega">
+          <p>Un cervello centrale è una cartella di note che gli agenti leggono per conoscere i tuoi progetti, ricordare le decisioni prese e riprendere il lavoro senza perdere il contesto.</p>
+          <p>Se lo colleghi, Crew Deck mette una sola riga in testa al primo messaggio di ogni sessione nuova: dice all'agente dove leggere le istruzioni, come creare il cervello del progetto se manca e dove annotare il lavoro fatto. Crew Deck non scrive file: lo fa l'agente, seguendo le regole del tuo cervello.</p>
+          <p>Non ce l'hai? Puoi farne a meno, oppure fartene creare uno: scegli una cartella e un agente ti guida passo passo.</p>
+          <div class="azioni"><button class="sec" onclick={creaCervello}>Creane uno</button><button class="link" onclick={() => (spiegaCervello = false)}>Chiudi</button></div>
+        </div>
+      {/if}
+      {#if cervello && rigaCervello}
+        <label class="riga-cervello"><input type="checkbox" bind:checked={conCervello} /> In testa al messaggio: <span class="tenue">«{rigaCervello.trim()}»</span></label>
+      {/if}
+    {/if}
 
     {#if scelta}
       <div class="conversazione">
@@ -250,7 +308,7 @@
     {#if conferma}
       <div class="conferma" role="alertdialog" aria-label="Conferma invio">
         {#if destinazione === "nuova"}
-          <p>Apro una sessione di <strong>{agenteNuovo}</strong> in <span class="mono">{cartellaNuova.replace(/^\/Users\/[^/]+/, "~")}</span> con questa richiesta?</p>
+          <p>Apro una sessione di <strong>{agenteNuovo}</strong> in <span class="mono">{cartellaNuova.replace(/^\/Users\/[^/]+/, "~")}</span> con questa richiesta{rigaAttiva ? ", con la riga del cervello centrale" : ""}?</p>
           <div><button class="pri" bind:this={primoConferma} onclick={() => invia(true)}>Apri</button><button class="sec" onclick={() => (conferma = false)}>Annulla</button></div>
         {:else}
           {#if scelta?.posizione?.app === "cmux" && cmuxStato && !cmuxStato.accesso}
@@ -353,6 +411,14 @@
   .scrittura { padding: 18px 20px 32px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
   .riga-dest { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
   .riga-dest label { color: var(--testo-3); font-size: 12px; }
+  .cervello { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; font-size: 12px; color: var(--testo-2); }
+  .cervello .etichetta { color: var(--testo-3); }
+  .interr-btn { width: 16px; height: 16px; border-radius: 50%; border: 1px solid var(--bordo); background: transparent; color: var(--testo-3); font-size: 10px; line-height: 1; padding: 0; cursor: pointer; }
+  .spiega { border: 1px solid var(--bordo); background: var(--pannello); border-radius: 8px; padding: 10px 14px; font-size: 13px; }
+  .spiega p { margin: 0 0 8px; }
+  .spiega .azioni { display: flex; gap: 12px; align-items: center; }
+  .riga-cervello { font-size: 12px; color: var(--testo-2); display: flex; gap: 6px; align-items: baseline; }
+  .riga-cervello .tenue { color: var(--testo-3); }
   select, input, textarea {
     font: inherit; color: var(--testo); background: var(--pannello); border: 1px solid var(--bordo); border-radius: 6px;
   }

@@ -180,6 +180,29 @@ pub fn nuova_sessione(agente: &str, cartella: &str, testo: &str) -> Result<Strin
     osascript(&script).map(|_| format!("Nuova sessione di {eseguibile} aperta in Ghostty"))
 }
 
+/// Riga messa in testa al primo messaggio di una sessione nuova quando è collegato un cervello centrale.
+pub fn riga_cervello(percorso: &str) -> String {
+    format!("Cervello centrale: {percorso}. Prima di cominciare leggi le sue istruzioni. Se questa cartella non ha un cervello locale, chiedi al cervello centrale come si crea e crealo. A fine lavoro annota cosa hai fatto dove il cervello centrale indica.\n\n")
+}
+
+/// Richiesta della procedura guidata «Creane uno»: la fa l'agente, Crew Deck non scrive file.
+pub fn richiesta_crea_cervello() -> String {
+    format!(
+        "Crea in questa cartella un cervello centrale seguendo il metodo qui sotto. Spiegami ogni passo e chiedimi ciò che serve, una domanda alla volta.\n\n{}",
+        include_str!("../../giudice/metodo-cervello.md")
+    )
+}
+
+/// Finestra di macOS per scegliere (o creare) una cartella. Annulla → Ok(None).
+pub fn scegli_cartella(titolo: &str) -> Result<Option<String>, String> {
+    let script = format!("POSIX path of (choose folder with prompt {})", as_str(titolo));
+    match osascript(&script) {
+        Ok(p) => Ok(Some(p.trim_end_matches('/').to_string()).filter(|p| !p.is_empty())),
+        Err(e) if e.contains("-128") => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
 /// Statistiche del registro dell'hook (solo numeri), degli ultimi `giorni`.
 pub fn debriefing(giorni: i64) -> Value {
     let percorso = dirs::home_dir().unwrap_or_default().join(".crew-deck/prompt-registro.jsonl");
@@ -226,4 +249,23 @@ pub fn debriefing(giorni: i64) -> Value {
         "quote": { "criterio_fine": quota("criterio_fine", true), "vincoli": quota("vincoli", true), "perche": quota("perche", true), "contesto": quota("contesto", true) },
         "per_progetto": per_progetto.iter().map(|(k, (n, c))| json!({"progetto": k, "compiti": n, "con_verifica": c})).collect::<Vec<_>>(),
     })
+}
+
+#[cfg(test)]
+mod prova_cervello {
+    use super::*;
+
+    #[test]
+    fn riga_cervello_testo_esatto() {
+        let r = riga_cervello("/a/b c'd");
+        assert!(r.starts_with("Cervello centrale: /a/b c'd. Prima di cominciare leggi le sue istruzioni."));
+        assert!(r.ends_with("dove il cervello centrale indica.\n\n"));
+    }
+
+    #[test]
+    fn richiesta_crea_cervello_contiene_metodo() {
+        let r = richiesta_crea_cervello();
+        assert!(r.contains("Spiegami ogni passo"));
+        assert!(r.contains("AGENTS.md"));
+    }
 }
