@@ -27,7 +27,18 @@ fn hook_attese() -> Option<bool> {
     if !home.join(".claude").is_dir() {
         return None;
     }
-    Some(std::fs::read_to_string(home.join(".claude/settings.json")).map(|t| t.contains("attesa.py")).unwrap_or(false))
+    let cfg = std::fs::read_to_string(home.join(".claude/settings.json")).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(serde_json::json!({}));
+    Some(VOCI_ATTESA.iter().all(|(evento, _, motivo)| ha_voce(&cfg, evento, motivo)))
+}
+
+/// Le voci dell'hook d'attesa: evento di Claude Code, matcher, motivo passato ad attesa.py.
+/// «fine» (Stop) cancella il segnale quando Claude ha finito di rispondere.
+const VOCI_ATTESA: [(&str, &str, &str); 3] = [("PreToolUse", "AskUserQuestion", "domanda"), ("Notification", "permission_prompt", "permesso"), ("Stop", "", "fine")];
+
+/// C'è già, sotto `evento`, un comando di attesa.py con questo motivo?
+fn ha_voce(cfg: &serde_json::Value, evento: &str, motivo: &str) -> bool {
+    let cerca = format!("attesa.py\" {motivo}");
+    cfg["hooks"][evento].as_array().is_some_and(|l| l.iter().any(|v| v["hooks"].as_array().is_some_and(|h| h.iter().any(|c| c["command"].as_str().is_some_and(|t| t.contains(&cerca))))))
 }
 
 /// Su richiesta: copia l'hook in ~/.crew-deck/attesa.py e lo aggiunge a ~/.claude/settings.json, dopo una copia di sicurezza.
@@ -43,10 +54,11 @@ fn attiva_hook_attese() -> Result<String, String> {
     std::fs::write(&script, ATTESA).map_err(|e| e.to_string())?;
     let file = home.join(".claude/settings.json");
     let testo = std::fs::read_to_string(&file).unwrap_or_else(|_| "{}".into());
-    if testo.contains("attesa.py") {
+    let mut cfg: serde_json::Value = serde_json::from_str(&testo).map_err(|_| "settings.json di Claude Code non è leggibile: non lo tocco")?;
+    let mancanti: Vec<_> = VOCI_ATTESA.iter().filter(|(evento, _, motivo)| !ha_voce(&cfg, evento, motivo)).collect();
+    if mancanti.is_empty() {
         return Ok("Già attivo".into());
     }
-    let mut cfg: serde_json::Value = serde_json::from_str(&testo).map_err(|_| "settings.json di Claude Code non è leggibile: non lo tocco")?;
     if file.exists() {
         let copia = home.join(format!(".claude/settings.json.bak-crewdeck-{}", ora_ms()));
         std::fs::copy(&file, &copia).map_err(|e| e.to_string())?;
@@ -56,11 +68,14 @@ fn attiva_hook_attese() -> Result<String, String> {
             "command": format!("python3 \"{}\" {motivo} 2>/dev/null || true", script.display())}]})
     };
     let hooks = cfg.as_object_mut().ok_or("settings.json non è un oggetto")?.entry("hooks").or_insert(serde_json::json!({}));
-    for (evento, v) in [("PreToolUse", voce("AskUserQuestion", "domanda")), ("Notification", voce("permission_prompt", "permesso"))] {
-        let lista = hooks.as_object_mut().ok_or("hooks non è un oggetto")?.entry(evento).or_insert(serde_json::json!([]));
-        lista.as_array_mut().ok_or("formato di hooks inatteso")?.push(v);
+    for (evento, matcher, motivo) in mancanti {
+        let lista = hooks.as_object_mut().ok_or("hooks non è un oggetto")?.entry(*evento).or_insert(serde_json::json!([]));
+        lista.as_array_mut().ok_or("formato di hooks inatteso")?.push(voce(matcher, motivo));
     }
-    std::fs::write(&file, serde_json::to_string_pretty(&cfg).unwrap() + "\n").map_err(|e| e.to_string())?;
+    // scrittura atomica: file accanto, poi rinomina; un'interruzione non lascia mai settings.json a metà
+    let temp = home.join(format!(".claude/settings.json.tmp-crewdeck-{}", ora_ms()));
+    std::fs::write(&temp, serde_json::to_string_pretty(&cfg).unwrap() + "\n").map_err(|e| e.to_string())?;
+    std::fs::rename(&temp, &file).map_err(|e| { let _ = std::fs::remove_file(&temp); e.to_string() })?;
     Ok("Attivato: vale per le sessioni di Claude Code aperte da adesso".into())
 }
 
@@ -300,8 +315,20 @@ mod prova_hook {
         assert!(home.join(".crew-deck/attesa.py").exists());
         let copie = std::fs::read_dir(home.join(".claude")).unwrap().filter(|e| e.as_ref().unwrap().file_name().to_string_lossy().contains("bak-crewdeck")).count();
         assert_eq!(copie, 1);
+        assert_eq!(cfg["hooks"]["Stop"][0]["hooks"][0]["command"].as_str().unwrap().contains("attesa.py\" fine"), true);
         assert_eq!(hook_attese(), Some(true));
         assert_eq!(attiva_hook_attese().unwrap(), "Già attivo");
+        // nessun file temporaneo lasciato accanto alle impostazioni
+        assert!(!std::fs::read_dir(home.join(".claude")).unwrap().any(|e| e.unwrap().file_name().to_string_lossy().contains("tmp")));
+        // installazione di prima (senza la voce «fine»): si aggiunge solo quella
+        std::fs::write(&file, r#"{"hooks":{"PreToolUse":[{"matcher":"AskUserQuestion","hooks":[{"type":"command","command":"python3 \"/x/attesa.py\" domanda"}]}],"Notification":[{"matcher":"permission_prompt","hooks":[{"type":"command","command":"python3 \"/x/attesa.py\" permesso"}]}]}}"#).unwrap();
+        assert_eq!(hook_attese(), Some(false));
+        attiva_hook_attese().unwrap();
+        let cfg: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+        assert_eq!(cfg["hooks"]["PreToolUse"].as_array().unwrap().len(), 1);
+        assert_eq!(cfg["hooks"]["Notification"].as_array().unwrap().len(), 1);
+        assert_eq!(cfg["hooks"]["Stop"].as_array().unwrap().len(), 1);
+        assert_eq!(hook_attese(), Some(true));
         // file illeggibile: non si tocca
         std::fs::write(&file, "{ rotto").unwrap();
         assert!(attiva_hook_attese().is_err());

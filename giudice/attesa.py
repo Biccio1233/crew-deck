@@ -9,6 +9,7 @@ Non scrive nella sessione, non blocca, non registra testi.
 Installazione (in ~/.claude/settings.json):
     hooks.PreToolUse   matcher "AskUserQuestion"   → python3 <percorso>/giudice/attesa.py domanda
     hooks.Notification matcher "permission_prompt" → python3 <percorso>/giudice/attesa.py permesso
+    hooks.Stop                                     → python3 <percorso>/giudice/attesa.py fine
 """
 import json
 import os
@@ -20,7 +21,11 @@ try:
     motivo = sys.argv[1]
     evento = json.load(sys.stdin)
     sessione = evento.get("session_id", "")
-    if motivo in ("domanda", "permesso") and re.fullmatch(r"[A-Za-z0-9-]{1,100}", sessione):
+    valida = re.fullmatch(r"[A-Za-z0-9-]{1,100}", sessione)
+    if motivo == "fine" and valida:
+        # Claude ha finito di rispondere: la sessione non aspetta più
+        (pathlib.Path.home() / ".crew-deck" / "attese" / sessione).unlink(missing_ok=True)
+    elif motivo in ("domanda", "permesso") and valida:
         cartella = pathlib.Path.home() / ".crew-deck" / "attese"
         cartella.mkdir(parents=True, exist_ok=True)
         segnale = cartella / sessione
