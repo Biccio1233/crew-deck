@@ -35,6 +35,15 @@ fn main() {
         }
         return;
     }
+    if let Some(i) = args.iter().position(|a| a == "--riprendi") {
+        // prova: --riprendi <agente> <id> [terminale]  (riapre una sessione chiusa in una scheda nuova)
+        let ag = match args[i + 1].as_str() { "claude" => crew_deck_lib::model::Agente::Claude, "codex" => crew_deck_lib::model::Agente::Codex, _ => crew_deck_lib::model::Agente::Pi };
+        match s.per_azione(ag, &args[i + 2]) {
+            Some((_, file, Some(cwd), ..)) => println!("{:?}", crew_deck_lib::azioni::riprendi(ag, &args[i + 2], &file, &cwd, args.get(i + 3).map(|s| s.as_str()).unwrap_or("Ghostty"))),
+            _ => println!("sessione non trovata o senza cartella"),
+        }
+        return;
+    }
     if std::env::args().any(|a| a == "--json") {
         println!("{}", serde_json::to_string(&s.viste(ora_ms())).unwrap());
         return;
