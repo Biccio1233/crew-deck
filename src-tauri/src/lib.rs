@@ -38,7 +38,7 @@ const VOCI_ATTESA: [(&str, &str, &str); 3] = [("PreToolUse", "AskUserQuestion", 
 /// Il comando lancia attesa.py con questo motivo? Percorso con o senza virgolette, semplici o doppie.
 fn comando_attesa(comando: &str, motivo: &str) -> bool {
     let parole: Vec<_> = comando.split_whitespace().map(|w| w.trim_matches(['"', '\''])).collect();
-    parole.windows(2).any(|w| w[0].ends_with("attesa.py") && w[1] == motivo)
+    parole.windows(2).any(|w| (w[0] == "attesa.py" || w[0].ends_with("/attesa.py")) && w[1] == motivo)
 }
 
 /// C'è già, sotto `evento` e con lo stesso matcher, un comando di attesa.py con questo motivo?
@@ -332,6 +332,7 @@ mod prova_hook {
         assert!(comando_attesa("python3 '/x/attesa.py' fine", "fine"));
         assert!(!comando_attesa("python3 /x/attesa.py domanda", "permesso"));
         assert!(!comando_attesa("python3 /x/attesa.py domandaX", "domanda"));
+        assert!(!comando_attesa("python3 /hooks/custom_attesa.py domanda", "domanda"));
     }
 
     #[test]
