@@ -6,6 +6,7 @@ pub mod localizza;
 pub mod engine;
 pub mod model;
 pub mod scanner;
+pub mod riassunti;
 pub mod segnali;
 
 use scanner::{Scanner, Vista};
@@ -33,6 +34,30 @@ pub fn testo_notifica(e: &segnali::Evento, su_cosa: Option<&str>) -> (String, St
 }
 
 pub struct Plancia(pub Mutex<Scanner>);
+
+fn cartella_riassunti() -> std::path::PathBuf {
+    dirs::home_dir().unwrap_or_default().join(".crew-deck/riassunti")
+}
+
+/// Mette nelle viste le due righe dell'ultimo riassunto salvato.
+fn con_riassunti(viste: &mut [Vista], dir: &std::path::Path) {
+    for v in viste {
+        if let Some(r) = riassunti::leggi(dir, &scanner::chiave(v.agente, &v.id)) {
+            v.su_cosa = Some(r.su_cosa);
+            v.esito = Some(r.esito);
+        }
+    }
+}
+
+fn lavoro_da(v: &Vista, attesa: Option<String>) -> riassunti::Lavoro {
+    riassunti::Lavoro { chiave: scanner::chiave(v.agente, &v.id), richiesta: v.richiesta.clone(), risposta: v.ultima_risposta.clone(), attesa, ultima_attivita: v.ultima_attivita }
+}
+
+/// Interruttore «Riassunti automatici» (spento all'avvio).
+#[tauri::command]
+fn imposta_riassunti(acceso: bool) {
+    riassunti::RIASSUNTI.store(acceso, std::sync::atomic::Ordering::Relaxed);
+}
 
 const ATTESA: &str = include_str!("../../giudice/attesa.py");
 
@@ -125,9 +150,13 @@ fn attiva_hook_attese() -> Result<String, String> {
 /// Elenco delle sessioni con lo stato calcolato adesso.
 #[tauri::command]
 fn sessioni(plancia: tauri::State<Plancia>) -> Vec<Vista> {
-    let mut s = plancia.0.lock().unwrap();
-    s.aggiorna();
-    s.viste(ora_ms())
+    let mut viste = {
+        let mut s = plancia.0.lock().unwrap();
+        s.aggiorna();
+        s.viste(ora_ms())
+    };
+    con_riassunti(&mut viste, &cartella_riassunti());
+    viste
 }
 
 fn agente_da(s: &str) -> Result<model::Agente, String> {
@@ -290,16 +319,32 @@ pub fn run() {
             std::thread::spawn(move || {
                 use tauri_plugin_notification::NotificationExt;
                 let mut memoria = segnali::Memoria::default();
+                let dir = cartella_riassunti();
+                let coda = riassunti::Coda::avvia(dir.clone());
+                // le sessioni vive mai riassunte si accodano una volta, al primo giro con l'interruttore acceso
+                let mut avvio_fatto = false;
                 loop {
-                let viste = {
+                let mut viste = {
                     let p = handle.state::<Plancia>();
                     let mut s = p.0.lock().unwrap();
                     s.aggiorna();
                     s.viste(ora_ms())
                 };
+                con_riassunti(&mut viste, &dir);
                 for e in memoria.passaggi(&viste, ora_ms()) {
-                    let (titolo, corpo) = testo_notifica(&e, None);
+                    let v = viste.iter().find(|v| scanner::chiave(v.agente, &v.id) == e.chiave);
+                    let (titolo, corpo) = testo_notifica(&e, v.and_then(|v| v.su_cosa.as_deref()));
                     let _ = handle.notification().builder().title(titolo).body(corpo).show();
+                    if let Some(v) = v {
+                        let attesa = matches!(e.tipo, segnali::Tipo::Domanda | segnali::Tipo::Permesso).then(|| e.motivo.clone());
+                        coda.chiedi(lavoro_da(v, attesa));
+                    }
+                }
+                if !avvio_fatto && riassunti::acceso() {
+                    for v in viste.iter().filter(|v| v.posizione.is_some() && !v.automatica && !v.chiusa && v.su_cosa.is_none()) {
+                        coda.chiedi(lavoro_da(v, None));
+                    }
+                    avvio_fatto = true;
                 }
                 let _ = handle.emit("sessioni", &viste);
                 std::thread::sleep(Duration::from_secs(2));
@@ -307,7 +352,7 @@ pub fn run() {
             });
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![sessioni, apri_sessione, giudica_prompt, riscrivi_prompt, suggerisci_risposta, invia_prompt, nuova_sessione, scegli_cartella, riga_cervello, crea_cervello, chiudi_sessione, stato_cmux, debriefing, hook_attese, attiva_hook_attese])
+        .invoke_handler(tauri::generate_handler![sessioni, apri_sessione, giudica_prompt, riscrivi_prompt, suggerisci_risposta, invia_prompt, nuova_sessione, scegli_cartella, riga_cervello, crea_cervello, chiudi_sessione, stato_cmux, debriefing, hook_attese, attiva_hook_attese, imposta_riassunti])
         .run(tauri::generate_context!())
         .expect("errore all'avvio di Crew Deck");
 }

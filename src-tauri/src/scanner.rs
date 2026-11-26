@@ -37,6 +37,10 @@ pub struct Vista {
     pub automatica: bool,
     /// Chiusa dall'utente nella vista (i file restano; ricompare se torna attiva).
     pub chiusa: bool,
+    /// Riga «su cosa» dell'ultimo riassunto salvato (la riempie lib.rs prima di mandare le viste).
+    pub su_cosa: Option<String>,
+    /// Riga «esito o domanda» dell'ultimo riassunto salvato.
+    pub esito: Option<String>,
     #[serde(flatten)]
     pub calcolo: Calcolo,
 }
@@ -191,6 +195,8 @@ impl Scanner {
                     origine: a.origine.clone(),
                     automatica: a.automatica,
                     chiusa: self.e_chiusa(&k, a.ultima_attivita),
+                    su_cosa: None,
+                    esito: None,
                     calcolo: {
                         let mut c = calcola(a, ora, &o);
                         // processo vivo in un terminale: la sessione è aperta e aspetta solo un messaggio, non è «in porto»

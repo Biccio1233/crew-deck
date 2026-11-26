@@ -9,7 +9,7 @@ use std::time::Duration;
 const GIUDICE: &str = include_str!("../../giudice/giudice.py");
 
 /// Esegue un comando con un tempo massimo, restituendo lo stdout.
-fn con_tempo(mut cmd: Command, stdin: Option<&str>, secondi: u64) -> Result<String, String> {
+pub(crate) fn con_tempo(mut cmd: Command, stdin: Option<&str>, secondi: u64) -> Result<String, String> {
     cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
     let mut figlio = cmd.spawn().map_err(|e| format!("non riesco ad avviare il comando: {e}"))?;
     if let Some(t) = stdin {

@@ -111,6 +111,8 @@ mod tests {
             origine: None,
             automatica: false,
             chiusa: false,
+            su_cosa: None,
+            esito: None,
             calcolo: Calcolo { stato, motivo, stimato: false, da_quando, azione: "azione".into() },
         }
     }
