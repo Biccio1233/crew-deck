@@ -7,6 +7,7 @@ il codice di Crew Deck o l'utente. Solo libreria standard.
     python3 giudice.py "testo del prompt" [--prima "ultimo messaggio dell'agente"]
     python3 giudice.py --payload "testo"     # mostra cosa partirebbe, senza rete
     python3 giudice.py --prova               # filtro e soglie, senza rete
+    python3 giudice.py --filtra < testo      # stampa il testo con i FILTRI applicati, senza rete
 
 Chiave: variabile TYPESAFE_API_KEY, altrimenti Portachiavi macOS (servizio TYPESAFE_API_KEY).
 """
@@ -216,6 +217,10 @@ if __name__ == "__main__":
     a = sys.argv[1:]
     if not a or a[0] == "--prova":
         _prova()
+        sys.exit(0)
+    if a[0] == "--filtra":
+        # per i riassunti di Crew Deck: testo su stdin, testo oscurato su stdout (UTF-8 in ogni caso)
+        sys.stdout.buffer.write(filtra(sys.stdin.buffer.read().decode("utf-8", "replace")).encode("utf-8"))
         sys.exit(0)
     prima = None
     if "--prima" in a:

@@ -7,6 +7,7 @@ pub mod engine;
 pub mod model;
 pub mod scanner;
 pub mod riassunti;
+pub mod riservatezza;
 pub mod segnali;
 
 use scanner::{Scanner, Vista};
@@ -26,7 +27,9 @@ pub fn testo_notifica(e: &segnali::Evento, su_cosa: Option<&str>) -> (String, St
         Tipo::Finito => format!("{} ha finito", e.progetto),
         Tipo::Errore => format!("{} si è fermata per un errore", e.progetto),
     };
+    // il motivo di un permesso contiene l'inizio del comando: se parla di password non si mostra
     let corpo = match su_cosa {
+        _ if riservatezza::sensibile(&e.motivo) => "Chiede il permesso per un comando".into(),
         Some(s) if !s.is_empty() => format!("{} · {}", e.motivo, s),
         _ => e.motivo.clone(),
     };
@@ -39,8 +42,11 @@ fn cartella_riassunti() -> std::path::PathBuf {
     dirs::home_dir().unwrap_or_default().join(".crew-deck/riassunti")
 }
 
-/// Mette nelle viste le due righe dell'ultimo riassunto salvato.
+/// Mette nelle viste le due righe dell'ultimo riassunto salvato, solo con l'interruttore acceso.
 fn con_riassunti(viste: &mut [Vista], dir: &std::path::Path) {
+    if !riassunti::acceso() {
+        return;
+    }
     for v in viste {
         if let Some(r) = riassunti::leggi(dir, &scanner::chiave(v.agente, &v.id)) {
             v.su_cosa = Some(r.su_cosa);
@@ -49,8 +55,13 @@ fn con_riassunti(viste: &mut [Vista], dir: &std::path::Path) {
     }
 }
 
+/// Revisione della sessione per i riassunti: il segnale dell'hook sposta `da_quando` senza muovere il registro.
+fn revisione(v: &Vista) -> i64 {
+    v.ultima_attivita.max(v.calcolo.da_quando)
+}
+
 fn lavoro_da(v: &Vista, attesa: Option<String>) -> riassunti::Lavoro {
-    riassunti::Lavoro { chiave: scanner::chiave(v.agente, &v.id), richiesta: v.richiesta.clone(), risposta: v.ultima_risposta.clone(), attesa, ultima_attivita: v.ultima_attivita }
+    riassunti::Lavoro { chiave: scanner::chiave(v.agente, &v.id), richiesta: v.richiesta.clone(), risposta: v.ultima_risposta.clone(), attesa, revisione: revisione(v) }
 }
 
 /// Interruttore «Riassunti automatici» (spento all'avvio).
@@ -321,35 +332,37 @@ pub fn run() {
                 let mut memoria = segnali::Memoria::default();
                 let dir = cartella_riassunti();
                 let coda = riassunti::Coda::avvia(dir.clone());
-                // le sessioni vive mai riassunte si accodano una volta, al primo giro con l'interruttore acceso
-                let mut avvio_fatto = false;
+                // a ogni accensione dell'interruttore (anche all'avvio) si accodano le sessioni vive senza riassunto o con uno scaduto
+                let mut era_acceso = false;
                 loop {
-                let mut viste = {
-                    let p = handle.state::<Plancia>();
-                    let mut s = p.0.lock().unwrap();
-                    s.aggiorna();
-                    s.viste(ora_ms())
-                };
-                con_riassunti(&mut viste, &dir);
-                for e in memoria.passaggi(&viste, ora_ms()) {
-                    let v = viste.iter().find(|v| scanner::chiave(v.agente, &v.id) == e.chiave);
-                    if e.notifica {
-                        let (titolo, corpo) = testo_notifica(&e, v.and_then(|v| v.su_cosa.as_deref()));
-                        let _ = handle.notification().builder().title(titolo).body(corpo).show();
+                    let mut viste = {
+                        let p = handle.state::<Plancia>();
+                        let mut s = p.0.lock().unwrap();
+                        s.aggiorna();
+                        s.viste(ora_ms())
+                    };
+                    con_riassunti(&mut viste, &dir);
+                    for e in memoria.passaggi(&viste, ora_ms()) {
+                        let v = viste.iter().find(|v| scanner::chiave(v.agente, &v.id) == e.chiave);
+                        if e.notifica {
+                            let (titolo, corpo) = testo_notifica(&e, v.and_then(|v| v.su_cosa.as_deref()));
+                            let _ = handle.notification().builder().title(titolo).body(corpo).show();
+                        }
+                        if let Some(v) = v {
+                            let attesa = matches!(e.tipo, segnali::Tipo::Domanda | segnali::Tipo::Permesso).then(|| e.motivo.clone());
+                            coda.chiedi(lavoro_da(v, attesa));
+                        }
                     }
-                    if let Some(v) = v {
-                        let attesa = matches!(e.tipo, segnali::Tipo::Domanda | segnali::Tipo::Permesso).then(|| e.motivo.clone());
-                        coda.chiedi(lavoro_da(v, attesa));
+                    let acceso = riassunti::acceso();
+                    if acceso && !era_acceso {
+                        let scaduto = |v: &Vista| riassunti::leggi(&dir, &scanner::chiave(v.agente, &v.id)).is_none_or(|r| r.fino_a < revisione(v));
+                        for v in viste.iter().filter(|v| v.posizione.is_some() && !v.automatica && !v.chiusa && scaduto(v)) {
+                            coda.chiedi(lavoro_da(v, (v.calcolo.stato == engine::Stato::Aspetta).then(|| v.calcolo.azione.clone())));
+                        }
                     }
-                }
-                if !avvio_fatto && riassunti::acceso() {
-                    for v in viste.iter().filter(|v| v.posizione.is_some() && !v.automatica && !v.chiusa && v.su_cosa.is_none()) {
-                        coda.chiedi(lavoro_da(v, (v.calcolo.stato == engine::Stato::Aspetta).then(|| v.calcolo.azione.clone())));
-                    }
-                    avvio_fatto = true;
-                }
-                let _ = handle.emit("sessioni", &viste);
-                std::thread::sleep(Duration::from_secs(2));
+                    era_acceso = acceso;
+                    let _ = handle.emit("sessioni", &viste);
+                    std::thread::sleep(Duration::from_secs(2));
                 }
             });
             Ok(())
@@ -407,6 +420,14 @@ mod prova_notifiche {
         let (t, c) = testo_notifica(&evento(), Some("Crew Deck — segnali"));
         assert_eq!(t, "crew-deck ti aspetta");
         assert_eq!(c, "Ti fa una domanda · Crew Deck — segnali");
+    }
+
+    #[test]
+    fn testo_notifica_comando_sensibile_resta_generico() {
+        let e = Evento { tipo: Tipo::Permesso, motivo: "Chiede il permesso: Esegue: export DB_PASSWORD=x".into(), ..evento() };
+        let (t, c) = testo_notifica(&e, Some("Crew Deck — deploy"));
+        assert_eq!(t, "crew-deck ti aspetta");
+        assert_eq!(c, "Chiede il permesso per un comando");
     }
 
     #[test]

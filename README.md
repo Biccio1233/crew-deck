@@ -32,11 +32,11 @@ Reading your sessions is local and read-only. Text leaves your machine only in t
 
 | Feature | What is sent, and where | When |
 |---|---|---|
-| **Automatic summaries** | the previous summary, your last request and the end of the last agent reply, to Claude Haiku via your own `claude -p` (no tools, no saved session) | only if you accept at first launch (default: No); switch **Riassunti automatici** in the header turns it off |
+| **Automatic summaries** | the previous summary, your last request, the end of the last agent reply and what the session is waiting for, to Claude Haiku via your own `claude -p` (no tools, no saved session); emails, API keys, IBANs, tax codes, phone numbers, file paths and links are replaced first (with `python3`: if it is missing, nothing is sent) | only if you accept at first launch (default: No); switch **Riassunti automatici** in the header turns it off |
 | **Prompt check («Jev»)** | your prompt and the agent's last message, to TypeSafe (`api.typesafe.ai`); emails, API keys, IBANs, tax codes, phone numbers, file paths and links are replaced first | only if you put your own TypeSafe key in the macOS Keychain; without it the check is off |
 | **Rifinisci, Approfondisci, Cosa rispondere** | your prompt and the end of the agent's reply, to Claude Sonnet via your own `claude -p` | only when you click the button |
 
-Text that mentions passwords or credentials (password, PIN, PUK, OTP, private key, seed phrase and similar words) is never sent to Jev or to the summaries. The three buttons run on a click you make, so they do not apply that block. Nothing else touches the network.
+Text that mentions passwords or credentials (password, PIN, PUK, OTP, private key, seed phrase and similar words) is never sent: not to Jev, not to the summaries, not by the three buttons (they answer «Non inviato» instead). A notification for a command that mentions them shows only «Chiede il permesso per un comando». Nothing else touches the network.
 
 ## Supported agents
 | Agent | Log location |

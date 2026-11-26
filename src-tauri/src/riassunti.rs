@@ -1,6 +1,7 @@
 //! Riassunti incrementali delle sessioni con Haiku: righe «su cosa» ed «esito o domanda».
 //! Metodo (non codice) da billion-context, `kernel/src/compression-rules.ts`, MIT.
 use crate::carteggio::{con_tempo, estrai_json};
+use crate::riservatezza::{filtra, sensibile};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -20,22 +21,8 @@ pub fn acceso() -> bool {
 pub struct Riassunto {
     pub su_cosa: String,
     pub esito: String,
-    /// `ultima_attivita` della sessione già riassunta.
+    /// Revisione (`Lavoro::revisione`) della sessione già riassunta.
     pub fino_a: i64,
-}
-
-/// Porta a mano la regex `SENSIBILE` di `giudice/giudice.py` (stessi termini, senza maiuscole, `\b` per pwd, pin, puk, otp)
-/// per non aggiungere la dipendenza `regex`. Se cambia là, va cambiata qui.
-pub fn sensibile(testo: &str) -> bool {
-    const OVUNQUE: [&str; 9] = ["passw", "password", "credenzial", "seed phrase", "frase segreta", "codice di accesso", "codice segreto", "chiave privata", "private key"];
-    const PAROLE: [&str; 4] = ["pwd", "pin", "puk", "otp"];
-    let t = testo.to_lowercase();
-    if OVUNQUE.iter().any(|p| t.contains(p)) {
-        return true;
-    }
-    // `\b` di Python: confine fra un carattere di parola (lettera, cifra, _) e uno che non lo è
-    let di_parola = |c: Option<char>| c.is_some_and(|c| c.is_alphanumeric() || c == '_');
-    PAROLE.iter().any(|p| t.match_indices(p).any(|(i, _)| !di_parola(t[..i].chars().next_back()) && !di_parola(t[i + p.len()..].chars().next())))
 }
 
 const ISTRUZIONI: &str = r#"Riassumi lo stato di una sessione di lavoro con un agente AI di programmazione (Claude Code, Codex, pi) in due righe brevi.
@@ -71,6 +58,30 @@ pub fn richiesta(prec: Option<&Riassunto>, richiesta: Option<&str>, risposta: Op
         t.push_str(&format!("\n<la_sessione_aspetta>\n{a}\n</la_sessione_aspetta>\n"));
     }
     t
+}
+
+/// Come `richiesta`, ma ogni campo passa prima da `filtra` (i `FILTRI` di giudice.py), poi si taglia:
+/// un percorso tagliato a metà non verrebbe più riconosciuto. Se il filtro fallisce non parte niente.
+fn richiesta_oscurata(prec: Option<&Riassunto>, l: &Lavoro, filtra: impl Fn(&str) -> Result<String, String>) -> Result<String, String> {
+    let prec = match prec {
+        Some(p) => Some(Riassunto { su_cosa: filtra(&p.su_cosa)?, esito: filtra(&p.esito)?, fino_a: p.fino_a }),
+        None => None,
+    };
+    let campo = |t: &Option<String>| t.as_deref().map(&filtra).transpose();
+    Ok(richiesta(prec.as_ref(), campo(&l.richiesta)?.as_deref(), campo(&l.risposta)?.as_deref(), campo(&l.attesa)?.as_deref()))
+}
+
+/// Con la sessione in attesa l'esito comincia sempre con «aspetta: » minuscolo, e resta entro le 12 parole.
+fn con_aspetta(esito: String, attesa: bool) -> String {
+    if !attesa {
+        return esito;
+    }
+    let t = esito.trim_start();
+    let resto = match t.get(..8) {
+        Some(p) if p.eq_ignore_ascii_case("aspetta:") => &t[8..],
+        _ => t,
+    };
+    parole(&format!("aspetta: {}", resto.trim_start()), 12)
 }
 
 fn parole(t: &str, n: usize) -> String {
@@ -112,7 +123,8 @@ pub struct Lavoro {
     pub richiesta: Option<String>,
     pub risposta: Option<String>,
     pub attesa: Option<String>,
-    pub ultima_attivita: i64,
+    /// `max(ultima_attivita, da_quando)`: il segnale dell'hook sposta `da_quando` senza muovere il registro.
+    pub revisione: i64,
 }
 
 /// Lavori in attesa, uno per sessione: chi arriva dopo prende il posto di quello che non è ancora partito.
@@ -168,7 +180,7 @@ impl Coda {
 /// Lavoro già fatto, o con testo sensibile (richiesta, risposta o motivo dell'attesa, che per un permesso
 /// contiene l'inizio del comando). Nel secondo caso si toglie il riassunto vecchio: la riga torna sul ripiego.
 fn da_saltare(dir: &Path, l: &Lavoro) -> bool {
-    if leggi(dir, &l.chiave).is_some_and(|p| l.ultima_attivita <= p.fino_a) {
+    if leggi(dir, &l.chiave).is_some_and(|p| l.revisione <= p.fino_a) {
         return true;
     }
     if [&l.richiesta, &l.risposta, &l.attesa].iter().any(|t| t.as_deref().is_some_and(sensibile)) {
@@ -183,35 +195,21 @@ fn esegui(dir: &Path, l: &Lavoro) -> Result<(), String> {
         return Ok(());
     }
     let prec = leggi(dir, &l.chiave);
-    let testo = richiesta(prec.as_ref(), l.richiesta.as_deref(), l.risposta.as_deref(), l.attesa.as_deref());
+    // fail closed: senza filtro (python3 mancante o in errore) non si invia e la riga resta com'è
+    let testo = richiesta_oscurata(prec.as_ref(), l, filtra).map_err(|e| format!("filtro non disponibile, non invio: {e}"))?;
     let mut cmd = Command::new("claude");
     cmd.args(["-p", "--tools", "", "--no-session-persistence", "--setting-sources", "", "--output-format", "text", "--model", "haiku"])
         .env("CREWDECK_GIUDICE", "0")
         .current_dir(std::env::temp_dir());
     let out = con_tempo(cmd, Some(&testo), 60)?;
     let (su_cosa, esito) = interpreta(&out).ok_or_else(|| format!("risposta non leggibile: {}", testa(&out, 200)))?;
-    scrivi(dir, &l.chiave, &Riassunto { su_cosa, esito, fino_a: l.ultima_attivita }).map_err(|e| e.to_string())
+    let esito = con_aspetta(esito, l.attesa.is_some());
+    scrivi(dir, &l.chiave, &Riassunto { su_cosa, esito, fino_a: l.revisione }).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
 mod prove {
     use super::*;
-
-    #[test]
-    fn sensibile_come_il_giudice() {
-        assert!(sensibile("non ricordo la password dell'archivio"));
-        assert!(sensibile("ho le pwd del server"));
-        assert!(sensibile("il pin della carta"));
-        assert!(sensibile("Il PIN della carta"));
-        assert!(sensibile("la Chiave Privata del wallet"));
-        assert!(!sensibile("sistema il login"));
-        assert!(!sensibile("aggiungi la spinta al pinguino"));
-        assert!(!sensibile("pwdx e pin_code"));
-        // stessi esiti della regex di giudice.py (confini di parola Unicode, spazi singoli)
-        for (t, atteso) in [("PIN:1234", true), ("spin", false), ("pin_x", false), ("x-pin-y", true), ("OTP", true), ("otp2", false), ("àpin", false), ("pinè", false), ("Seed  phrase", false), ("CODICE DI ACCESSO", true), ("codice  segreto", false), ("Passwort", true), ("pwd.", true), ("my_pwd", false)] {
-            assert_eq!(sensibile(t), atteso, "{t}");
-        }
-    }
 
     #[test]
     fn richiesta_contiene_precedente_e_attesa() {
@@ -242,8 +240,42 @@ mod prove {
         assert_eq!(interpreta(r#"{"su_cosa":"  ","esito":"x"}"#), None);
     }
 
-    fn lavoro(chiave: &str, ultima_attivita: i64, attesa: Option<&str>) -> Lavoro {
-        Lavoro { chiave: chiave.into(), richiesta: Some("sistema il login".into()), risposta: Some("Fatto.".into()), attesa: attesa.map(String::from), ultima_attivita }
+    fn lavoro(chiave: &str, revisione: i64, attesa: Option<&str>) -> Lavoro {
+        Lavoro { chiave: chiave.into(), richiesta: Some("sistema il login".into()), risposta: Some("Fatto.".into()), attesa: attesa.map(String::from), revisione }
+    }
+
+    #[test]
+    fn richiesta_oscurata_filtra_ogni_campo_prima_del_taglio() {
+        let prec = Riassunto { su_cosa: "Demo /Users/mario".into(), esito: "scritto a /Users/mario".into(), fino_a: 1 };
+        // il percorso sta proprio dove `coda` taglia: va oscurato prima, non dopo
+        let risposta = format!("{}/Users/mario/progetti/x.rs{}", "a".repeat(100), "b".repeat(2490));
+        let l = Lavoro { chiave: "claude:x".into(), richiesta: Some("apri /Users/mario/y".into()), risposta: Some(risposta), attesa: Some("Chiede il permesso: cat /Users/mario/z".into()), revisione: 5 };
+        let finto = |t: &str| Ok(t.replace("/Users/mario", "<percorso>"));
+        let t = richiesta_oscurata(Some(&prec), &l, finto).unwrap();
+        assert!(!t.contains("mario"), "{t}");
+        assert!(!t.contains("rs/"), "{t}");
+        assert_eq!(t.matches("<percorso>").count(), 4);
+        // il filtro non va (python3 manca): non parte niente
+        assert!(richiesta_oscurata(Some(&prec), &l, |_| Err("python3 non c'è".into())).is_err());
+    }
+
+    #[test]
+    fn esito_in_attesa_comincia_con_aspetta() {
+        assert_eq!(con_aspetta("Aspetta: modifica di auth.ts".into(), true), "aspetta: modifica di auth.ts");
+        assert_eq!(con_aspetta("ASPETTA:quale colore?".into(), true), "aspetta: quale colore?");
+        assert_eq!(con_aspetta("vuole sapere il limite dei rimborsi".into(), true), "aspetta: vuole sapere il limite dei rimborsi");
+        assert_eq!(con_aspetta("1 2 3 4 5 6 7 8 9 10 11 12".into(), true).split_whitespace().count(), 12);
+        assert_eq!(con_aspetta("Aspetta: niente".into(), false), "Aspetta: niente");
+    }
+
+    #[test]
+    fn gia_riassunto_si_salta_per_revisione() {
+        let dir = std::env::temp_dir().join(format!("crewdeck-revisione-{}-{}", std::process::id(), crate::ora_ms()));
+        scrivi(&dir, "claude:r", &Riassunto { su_cosa: "Demo — login".into(), esito: "fatto".into(), fino_a: 100 }).unwrap();
+        assert!(da_saltare(&dir, &lavoro("claude:r", 100, None)));
+        // il segnale dell'hook sposta da_quando (quindi la revisione) senza muovere il registro: si rifà
+        assert!(!da_saltare(&dir, &lavoro("claude:r", 150, Some("Ti fa una domanda"))));
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
@@ -265,7 +297,7 @@ mod prove {
         assert!(!p.metti(lavoro("claude:a", 2, Some("Ti fa una domanda"))));
         assert!(p.metti(lavoro("claude:b", 3, None)));
         let a = p.prendi("claude:a").unwrap();
-        assert_eq!((a.ultima_attivita, a.attesa.as_deref()), (2, Some("Ti fa una domanda")));
+        assert_eq!((a.revisione, a.attesa.as_deref()), (2, Some("Ti fa una domanda")));
         assert!(p.prendi("claude:a").is_none());
         // preso (in corso): un lavoro nuovo si accoda di nuovo
         assert!(p.metti(lavoro("claude:a", 4, None)));

@@ -1,12 +1,13 @@
 //! Sala carteggio: giudizio del prompt (Jev), riscrittura (Claude), invio nella sessione, debriefing.
 use crate::localizza::Posizione;
+use crate::riservatezza::sensibile;
 use serde_json::{json, Value};
 use std::io::Write;
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
 /// Il giudice è uno solo: lo stesso file usato dall'hook, incorporato nell'app.
-const GIUDICE: &str = include_str!("../../giudice/giudice.py");
+pub(crate) const GIUDICE: &str = include_str!("../../giudice/giudice.py");
 
 /// Esegue un comando con un tempo massimo, restituendo lo stdout.
 pub(crate) fn con_tempo(mut cmd: Command, stdin: Option<&str>, secondi: u64) -> Result<String, String> {
@@ -68,8 +69,14 @@ Poi riscrivi la richiesta chiedendo esattamente quello, nella lingua dell'autore
 Rispondi SOLO con un oggetto JSON, senza testo prima o dopo:
 {"professionista": "...", "materiale": "...", "metodi": "...", "prova": "...", "fuori": "...", "domande": ["..."], "prompt": "la richiesta riscritta"}"#;
 
+/// Risposta dei pulsanti quando il testo parla di password o credenziali (l'interfaccia la mostra com'è).
+pub(crate) const NON_INVIATO: &str = "Non inviato: il testo parla di password o credenziali";
+
 /// Riscrive il prompt con Claude (abbonamento dell'utente, niente strumenti, niente sessione salvata).
 pub fn riscrivi(modo: &str, testo: &str, prima: Option<&str>, mancanti: &[String]) -> Result<Value, String> {
+    if sensibile(testo) || prima.is_some_and(sensibile) {
+        return Err(NON_INVIATO.into());
+    }
     let istruzioni = if modo == "approfondisci" { APPROFONDISCI } else { RIFINISCI };
     let mut richiesta = format!("{istruzioni}\n\n<richiesta>\n{testo}\n</richiesta>\n");
     if let Some(p) = prima {
@@ -98,6 +105,9 @@ Rispondi SOLO con un oggetto JSON, senza testo prima o dopo:
 
 /// Propone cosa rispondere all'agente, dalla coppia ultima richiesta / ultima risposta.
 pub fn suggerisci(richiesta: Option<&str>, risposta: &str) -> Result<Value, String> {
+    if richiesta.is_some_and(sensibile) || sensibile(risposta) {
+        return Err(NON_INVIATO.into());
+    }
     let coda: String = risposta.chars().rev().take(2500).collect::<String>().chars().rev().collect();
     let testo = format!(
         "{SUGGERISCI}\n\n<ultima_richiesta_utente>\n{}\n</ultima_richiesta_utente>\n\n<ultima_risposta_agente>\n{coda}\n</ultima_risposta_agente>\n",
@@ -293,6 +303,19 @@ mod prova_cervello {
         let r = richiesta_crea_cervello();
         assert!(r.contains("Spiegami ogni passo"));
         assert!(r.contains("AGENTS.md"));
+    }
+
+    // si fermano prima di avviare `claude`: qui non serve
+    #[test]
+    fn riscrivi_rifiuta_testo_sensibile() {
+        assert_eq!(riscrivi("rifinisci", "metti la password del db nel file .env", None, &[]).unwrap_err(), NON_INVIATO);
+        assert_eq!(riscrivi("approfondisci", "sistema il login", Some("Mi serve il PIN della carta"), &[]).unwrap_err(), NON_INVIATO);
+    }
+
+    #[test]
+    fn suggerisci_rifiuta_testo_sensibile() {
+        assert_eq!(suggerisci(Some("accedi con le credenziali di prova"), "Fatto.").unwrap_err(), NON_INVIATO);
+        assert_eq!(suggerisci(Some("sistema il login"), "Mi dai la password dell'archivio?").unwrap_err(), NON_INVIATO);
     }
 
     #[test]
