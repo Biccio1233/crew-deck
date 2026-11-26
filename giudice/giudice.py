@@ -198,7 +198,7 @@ def valuta(risposta: dict) -> dict:
 def _prova():
     casi = {
         "scrivi a mario.rossi@cliente.it": "<email>",
-        "guarda /Users/bix12/Library/CloudStorage/Dropbox-Mbssrl/Fabrizio Palai/superbrain/1. gruppo/x/PIANO.md": "<percorso>/PIANO.md",
+        "guarda /Users/mario/Library/CloudStorage/Dropbox-Studio/Mario Rossi/archivio/1. gruppo/x/PIANO.md": "<percorso>/PIANO.md",
         "la chiave è sk-abcdefghijklmnop1234": "<chiave>",
         "chiamami al 347 1234567": "<telefono>",
     }
