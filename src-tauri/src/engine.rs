@@ -50,6 +50,9 @@ pub struct Calcolo {
     pub azione: String,
 }
 
+/// Dopo quanto uno strumento fermo fa pensare a una richiesta di permesso.
+pub const SOGLIA_PERMESSO_MS: i64 = 10_000;
+
 pub struct Opzioni {
     pub inattivo_dopo_ms: i64,
     pub soglia_permesso_ms: i64,
@@ -58,7 +61,7 @@ pub struct Opzioni {
 
 impl Default for Opzioni {
     fn default() -> Self {
-        Opzioni { inattivo_dopo_ms: 30 * 60_000, soglia_permesso_ms: 10_000, pensa_max_ms: 10 * 60_000 }
+        Opzioni { inattivo_dopo_ms: 30 * 60_000, soglia_permesso_ms: SOGLIA_PERMESSO_MS, pensa_max_ms: 10 * 60_000 }
     }
 }
 
