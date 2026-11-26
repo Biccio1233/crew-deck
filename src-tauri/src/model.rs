@@ -116,7 +116,14 @@ impl Acc {
             let n = t.chars().count();
             // si decide sul testo intero: una credenziale all'inizio di una risposta lunga sparisce dalla coda, il suo valore no
             self.ultimo_testo_sensibile = crate::riservatezza::sensibile(t);
-            self.ultimo_testo = Some(if n > 2000 { t.chars().skip(n - 2000).collect() } else { t.to_string() });
+            self.ultimo_testo = if n > 2000 {
+                // il taglio può spezzare una chiave, un'email o un percorso, e il pezzo non lo riconosce più il filtro:
+                // si toglie la parola tagliata (fino al primo spazio o a capo compreso)
+                let coda: String = t.chars().skip(n - 2000).collect();
+                coda.split_once(char::is_whitespace).map(|(_, resto)| resto.trim_start().to_string()).filter(|r| !r.is_empty())
+            } else {
+                Some(t.to_string())
+            };
         }
     }
 
@@ -221,6 +228,13 @@ pub fn nome_file(p: &str) -> String {
     p.rsplit(['/', '\\']).next().unwrap_or(p).to_string()
 }
 
+/// Come `corto`, ma la riservatezza si decide sul testo intero: se parla di password o credenziali
+/// (anche dopo il taglio) l'etichetta non ne mostra niente, e dice «credenziali» così chi la legge dopo
+/// (notifica, riassunto) la tratta da sensibile senza un campo in più.
+pub fn corto_riservato(s: &str, max: usize) -> String {
+    if crate::riservatezza::sensibile(s) { "(testo con credenziali, nascosto)".into() } else { corto(s, max) }
+}
+
 /// Frase leggibile per uno strumento, comune ai tre agenti.
 pub fn azione_strumento(nome: &str, input: &serde_json::Value) -> String {
     let s = |k: &str| input.get(k).and_then(|v| v.as_str()).unwrap_or("");
@@ -229,10 +243,10 @@ pub fn azione_strumento(nome: &str, input: &serde_json::Value) -> String {
         "bash" | "shell" | "exec" | "exec_command" | "powershell" => {
             let d = s("description");
             if !d.is_empty() {
-                format!("Esegue: {}", corto(d, 60))
+                format!("Esegue: {}", corto_riservato(d, 60))
             } else {
                 let c = if s("command").is_empty() { s("cmd") } else { s("command") };
-                format!("Esegue: {}", corto(c, 60))
+                format!("Esegue: {}", corto_riservato(c, 60))
             }
         }
         "read" => format!("Legge {}", nome_file(if s("file_path").is_empty() { s("path") } else { s("file_path") })),
@@ -241,10 +255,10 @@ pub fn azione_strumento(nome: &str, input: &serde_json::Value) -> String {
             if f.is_empty() { "Modifica file".into() } else { format!("Modifica {}", nome_file(f)) }
         }
         "write" => format!("Scrive {}", nome_file(if s("file_path").is_empty() { s("path") } else { s("file_path") })),
-        "grep" | "glob" => format!("Cerca: {}", corto(if s("pattern").is_empty() { s("query") } else { s("pattern") }, 50)),
-        "websearch" | "web_search" => format!("Cerca sul web: {}", corto(s("query"), 50)),
-        "webfetch" | "web_fetch" => format!("Legge una pagina web: {}", corto(s("url"), 50)),
-        "task" | "agent" => format!("Affida a un aiutante: {}", corto(s("description"), 50)),
+        "grep" | "glob" => format!("Cerca: {}", corto_riservato(if s("pattern").is_empty() { s("query") } else { s("pattern") }, 50)),
+        "websearch" | "web_search" => format!("Cerca sul web: {}", corto_riservato(s("query"), 50)),
+        "webfetch" | "web_fetch" => format!("Legge una pagina web: {}", corto_riservato(s("url"), 50)),
+        "task" | "agent" => format!("Affida a un aiutante: {}", corto_riservato(s("description"), 50)),
         "askuserquestion" | "request_user_input" => "Ti fa una domanda".into(),
         "todowrite" => "Aggiorna la lista delle cose da fare".into(),
         "codemode" => "Esegue uno script di strumenti".into(),
@@ -253,5 +267,22 @@ pub fn azione_strumento(nome: &str, input: &serde_json::Value) -> String {
             Some((server, strumento)) => format!("Usa {}: {}", server.replace("plugin_", "").replace('_', " "), strumento.replace('_', " ")),
             None => format!("Usa {}", nome),
         },
+    }
+}
+
+#[cfg(test)]
+mod prove {
+    use super::*;
+
+    #[test]
+    fn coda_della_risposta_senza_frammento_tagliato() {
+        // il taglio a 2000 caratteri cade dentro un percorso: il pezzo rimasto non si riconoscerebbe più
+        let testo = format!("{} /Users/mario/progetti/x.rs {}", "a".repeat(480), "b".repeat(1990));
+        let mut acc = Acc::new(Agente::Claude, "x".into(), "/Users/mario/s.jsonl".into());
+        acc.testo_agente(&testo);
+        assert_eq!(acc.ultimo_testo.as_deref(), Some("b".repeat(1990).as_str()));
+        // testo corto: resta intero
+        acc.testo_agente("Fatto: /Users/mario/x.rs");
+        assert_eq!(acc.ultimo_testo.as_deref(), Some("Fatto: /Users/mario/x.rs"));
     }
 }

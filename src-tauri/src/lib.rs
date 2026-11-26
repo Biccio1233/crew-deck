@@ -442,6 +442,20 @@ mod prova_notifiche {
     }
 
     #[test]
+    fn comando_lungo_con_password_dopo_il_taglio_resta_nascosto() {
+        // valore all'inizio, la parola «password» dopo i 60 caratteri dell'etichetta
+        let comando = format!("mysql -u admin -pS3greto!Valore123 -h db.interno --database ordini --execute 'select 1' # password del db{}", " ".repeat(100));
+        let etichetta = model::azione_strumento("Bash", &serde_json::json!({ "command": comando }));
+        assert!(!etichetta.contains("S3greto"), "{etichetta}");
+        let e = Evento { tipo: Tipo::Permesso, motivo: format!("Chiede il permesso: {etichetta}"), ..evento() };
+        assert_eq!(testo_notifica(&e, None).1, "Chiede il permesso per un comando");
+        // e verso Haiku: il motivo dell'attesa è sensibile, il riassunto si salta
+        assert!(riservatezza::sensibile(&e.motivo));
+        // stessa regola per l'etichetta di Codex, costruita a parte
+        assert!(model::corto_riservato(&comando, 60).contains("credenziali"));
+    }
+
+    #[test]
     fn testo_notifica_senza_riassunto() {
         let (_, c) = testo_notifica(&evento(), None);
         assert_eq!(c, "Ti fa una domanda");

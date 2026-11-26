@@ -1,5 +1,5 @@
 //! Codex: `~/.codex/sessions/AAAA/MM/GG/rollout-*.jsonl`.
-use crate::model::{azione_strumento, corto, ts_ms, Acc, Ev, Token};
+use crate::model::{azione_strumento, corto, corto_riservato, ts_ms, Acc, Ev, Token};
 use serde_json::Value;
 
 pub fn feed(acc: &mut Acc, riga: &Value) {
@@ -92,7 +92,7 @@ pub fn feed(acc: &mut Acc, riga: &Value) {
             let azione = match p.get("input").and_then(|v| v.as_str()) {
                 // Codex scrive i comandi dentro piccoli script: si estrae il `cmd`
                 Some(script) => match cmd_da_script(script) {
-                    Some(c) => format!("Esegue: {}", corto(&c, 60)),
+                    Some(c) => format!("Esegue: {}", corto_riservato(&c, 60)),
                     None => "Esegue uno script di strumenti".to_string(),
                 },
                 None => azione_strumento(&nome, &args),

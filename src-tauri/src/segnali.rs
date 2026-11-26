@@ -36,6 +36,8 @@ pub struct Memoria {
     precedente: HashMap<String, (Stato, Motivo, i64, Option<i64>)>,
     /// Per sessione: turno (`inizio_turno`) dell'ultimo permesso notificato.
     permesso_notificato: HashMap<String, i64>,
+    /// Per sessione: l'ultima attesa di permesso (`inizio_turno`, `da_quando`) che ha già dato un evento.
+    permesso_emesso: HashMap<String, (Option<i64>, i64)>,
     /// Sessioni già in attesa di permesso al primo giro: quell'attesa (`inizio_turno`, `da_quando`) non si notifica.
     attesa_ignorata: HashMap<String, (Option<i64>, i64)>,
 }
@@ -67,18 +69,20 @@ impl Memoria {
                 None => (Stato::Inattivo, Motivo::Silenzio, 0, None),
             };
             let ignorata = self.attesa_ignorata.contains_key(&k);
-            // ponytail: senza `inizio_turno` (sessione senza richieste) vale 0, quindi un solo permesso in tutto; per superarlo serve un id di turno vero
+            // ponytail: senza `inizio_turno` (sessione senza richieste) vale 0, quindi una sola notifica di permesso in tutto; per superarla serve un id di turno vero
             let turno = v.inizio_turno.unwrap_or(0);
             // a parità di stato e motivo, un `da_quando` nuovo è un'altra attesa o un altro turno arrivato fra due letture
             // (per la domanda solo se più recente: dal segnale dell'hook al registro `da_quando` torna indietro)
             let nuova_domanda = (s0, m0) != (Stato::Aspetta, Motivo::Domanda) || c.da_quando > d0;
-            let nuovo_permesso = (s0, m0) != (Stato::Aspetta, Motivo::Permesso) || c.da_quando != d0;
+            // ogni attesa di permesso nuova dà un evento (il riassunto si aggiorna); la notifica resta una per turno
+            let nuovo_permesso = self.permesso_emesso.get(&k) != Some(&attesa);
+            let prima_del_turno = self.permesso_notificato.get(&k) != Some(&turno);
             // fra due fini serve un turno nuovo: end_turn e turn_duration, o gli api_error a ogni tentativo, sono lo stesso turno
             let fine = ora - c.da_quando <= FINE_FRESCA_MS && (matches!(s0, Stato::Lavora | Stato::Aspetta) || (s0 == Stato::Finito && v.inizio_turno != t0));
             let tipo = match (c.stato, c.motivo) {
                 (Stato::Aspetta, Motivo::Domanda) if nuova_domanda => Some((Tipo::Domanda, true)),
-                (Stato::Aspetta, Motivo::Permesso) if !ignorata && nuovo_permesso && self.permesso_notificato.get(&k) != Some(&turno) => Some((Tipo::Permesso, true)),
-                (Stato::Aspetta, Motivo::PermessoStimato) if !ignorata && ora - (c.da_quando - SOGLIA_PERMESSO_MS) >= PERMESSO_STIMATO_MS && self.permesso_notificato.get(&k) != Some(&turno) => Some((Tipo::Permesso, true)),
+                (Stato::Aspetta, Motivo::Permesso) if !ignorata && nuovo_permesso => Some((Tipo::Permesso, prima_del_turno)),
+                (Stato::Aspetta, Motivo::PermessoStimato) if !ignorata && nuovo_permesso && ora - (c.da_quando - SOGLIA_PERMESSO_MS) >= PERMESSO_STIMATO_MS => Some((Tipo::Permesso, prima_del_turno)),
                 // ogni turno finito si riassume; si notifica solo se è durato più di 2 minuti
                 (Stato::Finito, Motivo::FineTurno) if fine => Some((Tipo::Finito, v.inizio_turno.is_some_and(|t| c.da_quando - t > TURNO_LUNGO_MS))),
                 (Stato::Finito, Motivo::ErroreApi) if fine => Some((Tipo::Errore, true)),
@@ -86,12 +90,16 @@ impl Memoria {
             };
             if let Some((tipo, notifica)) = tipo {
                 if tipo == Tipo::Permesso {
-                    self.permesso_notificato.insert(k.clone(), turno);
+                    self.permesso_emesso.insert(k.clone(), attesa);
+                    if notifica {
+                        self.permesso_notificato.insert(k.clone(), turno);
+                    }
                 }
                 eventi.push(Evento { chiave: k, tipo, progetto: v.progetto.clone(), motivo: c.azione.clone(), notifica });
             }
         }
         self.permesso_notificato.retain(|k, _| adesso.contains_key(k));
+        self.permesso_emesso.retain(|k, _| adesso.contains_key(k));
         self.attesa_ignorata.retain(|k, _| adesso.contains_key(k));
         self.precedente = adesso;
         self.primo_giro_fatto = true;
@@ -285,8 +293,10 @@ mod tests {
         let mut m = Memoria::default();
         m.passaggi(&[lavora(0)], 1);
         assert_eq!(m.passaggi(&[vista("a", Stato::Aspetta, Motivo::Permesso, 5, Some(0))], 6).len(), 1);
-        // stesso turno: resta il limite di uno per turno
-        assert!(m.passaggi(&[vista("a", Stato::Aspetta, Motivo::Permesso, 8, Some(0))], 9).is_empty());
+        // stesso turno: evento (il riassunto si aggiorna) ma niente seconda notifica
+        let e = m.passaggi(&[vista("a", Stato::Aspetta, Motivo::Permesso, 8, Some(0))], 9);
+        assert_eq!(e.len(), 1);
+        assert!(!e[0].notifica);
         let e = m.passaggi(&[vista("a", Stato::Aspetta, Motivo::Permesso, 20, Some(15))], 21);
         assert_eq!(e.len(), 1);
         assert_eq!(e[0].tipo, Tipo::Permesso);
@@ -359,6 +369,26 @@ mod tests {
         let e = m.passaggi(&[vista("a", Stato::Aspetta, Motivo::Permesso, 50, Some(40))], 51);
         assert_eq!(e.len(), 1);
         assert_eq!(e[0].tipo, Tipo::Permesso);
+    }
+
+    #[test]
+    fn permessi_successivi_nel_turno_emettono_senza_notifica() {
+        let t = 1_000_000;
+        let mut m = Memoria::default();
+        m.passaggi(&[lavora(t)], t + 1);
+        let e = m.passaggi(&[vista("a", Stato::Aspetta, Motivo::Permesso, t + 5, Some(t))], t + 6);
+        assert!(e[0].notifica);
+        m.passaggi(&[vista("a", Stato::Lavora, Motivo::Strumento, t, Some(t))], t + 7);
+        let e = m.passaggi(&[vista("a", Stato::Aspetta, Motivo::Permesso, t + 9, Some(t))], t + 10);
+        assert_eq!(e.len(), 1);
+        assert!(!e[0].notifica);
+        assert!(m.passaggi(&[vista("a", Stato::Aspetta, Motivo::Permesso, t + 9, Some(t))], t + 11).is_empty());
+        // stimato nello stesso turno: dopo i 30 secondi un evento senza notifica, uno solo
+        let stimato = vista("a", Stato::Aspetta, Motivo::PermessoStimato, t + 50_000, Some(t));
+        let e = m.passaggi(&[stimato.clone()], t + 71_000);
+        assert_eq!(e.len(), 1);
+        assert!(!e[0].notifica);
+        assert!(m.passaggi(&[stimato], t + 72_000).is_empty());
     }
 
     #[test]

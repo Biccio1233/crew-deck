@@ -16,7 +16,12 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     if let Some(i) = args.iter().position(|a| a == "--suggerisci") {
         let ag = match args[i + 1].as_str() { "claude" => crew_deck_lib::model::Agente::Claude, "codex" => crew_deck_lib::model::Agente::Codex, _ => crew_deck_lib::model::Agente::Pi };
-        let (rq, rs, _) = s.conversazione(ag, &args[i + 2]).expect("sessione");
+        let (rq, rs, rs_sensibile) = s.conversazione(ag, &args[i + 2]).expect("sessione");
+        // stessa guardia dell'app: la risposta intera parlava di password o credenziali
+        if rs_sensibile {
+            println!("{}", serde_json::json!({"errore": crew_deck_lib::carteggio::NON_INVIATO}));
+            return;
+        }
         println!("{}", serde_json::to_string_pretty(&crew_deck_lib::carteggio::suggerisci(rq.as_deref(), rs.as_deref().unwrap_or("")).unwrap_or_else(|e| serde_json::json!({"errore": e}))).unwrap());
         return;
     }
