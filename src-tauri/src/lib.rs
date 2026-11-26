@@ -265,6 +265,7 @@ pub fn run() {
     let home = dirs::home_dir().expect("cartella home non trovata");
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_notification::init())
         .manage(Plancia(Mutex::new(Scanner::new(&home))))
         .menu(menu_italiano)
         .setup(|app| {
