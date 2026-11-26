@@ -78,6 +78,14 @@ Restano fuori: l'intermediario, gli strumenti compress/decompress, i livelli 1 e
 - Privacy: README (punto 7) e `INSTALLA.md` dicono cosa esce, quando e come spegnerlo. Le regole del progetto («Privacy» in AGENTS.md) si aggiornano con i riassunti automatici.
 - Sicurezza: `differential-review` prima del merge e secondo parere di Codex, come ogni modifica.
 
+## Altri agenti ed editor (richiesta dell'autore del 26/11)
+Crew Deck deve poter accogliere altri agenti (Gemini CLI, OpenCode, Copilot CLI, Cursor…) e sessioni che girano negli editor (VS Code, Cursor, Zed). In questo progetto se ne tiene conto così:
+- Notifiche e riassunti lavorano solo sugli stati comuni (`Stato`, motivo, turno, ultime richieste e ultima frase dell'agente) prodotti dai lettori, mai su campi di un agente preciso. Un agente nuovo li ottiene appena il suo lettore produce gli stati, senza toccare questa parte.
+- La regola dei permessi segue la fonte, non il nome dell'agente: segnale certo (un hook, oggi solo Claude) → regola dei certi; deduzione dal registro → regola degli stimati (30 secondi).
+- Il clic sulla notifica porta in primo piano Crew Deck, non un terminale: vale qualunque sia l'editor o il terminale della sessione.
+- Le sessioni di Claude Code dentro un editor (estensione per VS Code, `entrypoint: claude-vscode`) finiscono già negli stessi registri: ricevono notifiche e riassunti come le altre.
+Fuori da questo progetto, in uno successivo: i lettori dei nuovi agenti e l'«Apri» negli editor (riconoscere che una sessione gira in VS Code, Cursor o Zed e aprirla lì).
+
 ## Lasciato a chi costruisce
 - Lunghezza massima dell'ingresso del riassunto e testo esatto del prompt per Haiku (in linea con il metodo sopra).
 - Come si rappresentano i passaggi di stato nel motore e come arrivano all'interfaccia.
