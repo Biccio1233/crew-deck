@@ -12,6 +12,7 @@
     titolo: string | null; modello: string | null; richiesta: string | null; n_richieste: number;
     inizio: number | null; ultima_attivita: number; ruolo: string; costo_usd: number | null; errori: number;
     automatica: boolean; origine: string | null;
+    su_cosa: string | null; esito: string | null; inizio_turno: number | null;
     token: { input: number; output: number; cache_lettura: number; cache_scrittura: number };
     stato: Stato; motivo: string; stimato: boolean; da_quando: number; azione: string;
     file: string; ultima_app: string | null; ultima_risposta: string | null; chiusa: boolean;
@@ -85,6 +86,9 @@
     const t = s.token.input + s.token.output + s.token.cache_lettura + s.token.cache_scrittura;
     return t >= 1e6 ? `${(t / 1e6).toFixed(1)} M` : t >= 1e3 ? `${Math.round(t / 1e3)} k` : `${t}`;
   }
+  // su cosa lavora: riassunto di Haiku, poi titolo, poi la richiesta tagliata (testo semplice, mai HTML)
+  const suCosa = (s: Vista) =>
+    s.su_cosa ?? s.titolo ?? (s.richiesta ? (s.richiesta.length > 60 ? s.richiesta.slice(0, 60).trimEnd() + "…" : s.richiesta) : null);
   const chiave = (s: Vista) => s.agente + ":" + s.id;
   const NOMI_APP: Record<string, string> = { Terminal: "Terminale", Code: "VS Code", Claude: "app Claude", Codex: "app Codex" };
   const nomeApp = (a: string) => NOMI_APP[a] ?? a;
@@ -142,7 +146,21 @@
     timerEsito = setTimeout(() => (esito = null), 6000);
   }
 
+  // riassunti automatici: il testo delle sessioni va a Claude, quindi si parte spenti e si chiede una volta
+  const leggiRiassunti = (): boolean | null => {
+    try { const v = localStorage.getItem("crewdeck.riassunti"); return v === null ? null : v === "1"; } catch { return null; }
+  };
+  let riassunti = $state<boolean | null>(leggiRiassunti());
+  async function scegliRiassunti(acceso: boolean) {
+    riassunti = acceso;
+    try { localStorage.setItem("crewdeck.riassunti", acceso ? "1" : "0"); } catch {}
+    if (!("__TAURI_INTERNALS__" in window)) return;
+    try { await invoke("imposta_riassunti", { acceso }); } catch (e) { esito = { testo: String(e), errore: true }; }
+  }
+
   onMount(() => {
+    // il backend parte sempre con i riassunti spenti: si rimanda la scelta salvata
+    if (riassunti !== null && "__TAURI_INTERNALS__" in window) invoke("imposta_riassunti", { acceso: riassunti }).catch(() => {});
     // anteprima nel browser (senza Tauri): legge un file di esempio
     if (!("__TAURI_INTERNALS__" in window)) {
       fetch("/anteprima.json").then((r) => r.json()).then((v) => { sessioni = v; caricato = true; }).catch(() => (caricato = true));
@@ -178,6 +196,8 @@
     <div class="destra">
       <span class="costo" title={dettaglioCosti}>stimato oggi <strong>${costoOggi.toFixed(2)}</strong></span>
       {#if vista === "plancia"}
+      <button class="interruttore" aria-pressed={riassunti === true} onclick={() => scegliRiassunti(riassunti !== true)}
+        title="Il testo delle sessioni va a Claude (modello Haiku) per scrivere le righe riassunte">Riassunti automatici</button>
       <button class="interruttore" aria-pressed={automatiche} onclick={() => (automatiche = !automatiche)}
         title="Sessioni avviate da altri programmi (graphify, Floorplan, script)">Automatiche</button>
       {/if}
@@ -203,6 +223,13 @@
     </div>
 
     </div>
+    {#if riassunti === null}
+      <div class="invito">
+        <p>Vuoi le righe riassunte? Il testo delle sessioni va a Claude con il tuo abbonamento.</p>
+        <button class="sec" onclick={() => scegliRiassunti(false)}>No</button>
+        <button class="pri" onclick={() => scegliRiassunti(true)}>Sì</button>
+      </div>
+    {/if}
     {#if hookAttese === false && !hookRimandato}
       <div class="invito">
         <p>Claude Code scrive le sue domande nel registro solo dopo la tua risposta: per vedere subito chi ti aspetta, attiva l'avviso di Crew Deck nelle impostazioni di Claude Code (ne faccio prima una copia).</p>
@@ -231,12 +258,13 @@
                 <span class="principale">
                   <span class="r1">
                     <span class="progetto" title={s.cartella?.replace(/^\/Users\/[^/]+/, "~") ?? ""}>{s.progetto}</span>
-                    {#if s.titolo}<span class="titolo">{s.titolo}</span>{/if}
+                    {#if suCosa(s)}<span class="titolo" class:riassunto={!!s.su_cosa}>{suCosa(s)}</span>{/if}
                   </span>
                   <span class="azione">
                     {s.azione}{#if s.stimato}<span class="stima">stima</span>{/if}
                   </span>
                   {#if s.richiesta}<span class="richiesta">{s.richiesta}</span>{/if}
+                  {#if s.esito}<span class="esito-riga">{s.esito}</span>{/if}
                 </span>
                 <span class="lato">
                   <span class="tempo">{trascorso(s.da_quando)}{#if s.posizione}<span class="dove" title={s.posizione.tty ?? ""}>{" · "}{nomeApp(s.posizione.app)}</span>{/if}</span>
@@ -464,6 +492,7 @@
   li.compatta .riga { padding-top: 7px; padding-bottom: 7px; align-items: center; }
   li.compatta .principale { flex-direction: row; gap: 10px; align-items: baseline; }
   li.compatta .azione, li.compatta .richiesta, li.compatta .numeri { display: none; }
+  li.compatta .esito-riga { flex: 1 1 0; }
   li.compatta .lato { grid-auto-flow: column; align-items: center; gap: 8px; }
   li.compatta .vai { margin-top: 6px; }
   .altri {
@@ -507,6 +536,9 @@
   }
   .richiesta { color: var(--testo-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 12.5px; }
   .richiesta::before { content: "↳ "; opacity: 0.7; }
+  .titolo.riassunto { color: var(--testo-2); }
+  .esito-riga { color: var(--testo-2); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  li.compatta .esito-riga { color: var(--testo-3); }
 
   .lato { display: grid; justify-items: end; align-content: start; gap: 4px; }
   .tempo { font-variant-numeric: tabular-nums; color: var(--testo-2); font-size: 12px; }
