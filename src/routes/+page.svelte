@@ -152,10 +152,12 @@
   };
   let riassunti = $state<boolean | null>(leggiRiassunti());
   async function scegliRiassunti(acceso: boolean) {
+    // l'interruttore cambia solo se il backend ha preso la scelta: mai uno stato diverso da quello vero
+    if ("__TAURI_INTERNALS__" in window) {
+      try { await invoke("imposta_riassunti", { acceso }); } catch (e) { esito = { testo: String(e), errore: true }; return; }
+    }
     riassunti = acceso;
     try { localStorage.setItem("crewdeck.riassunti", acceso ? "1" : "0"); } catch {}
-    if (!("__TAURI_INTERNALS__" in window)) return;
-    try { await invoke("imposta_riassunti", { acceso }); } catch (e) { esito = { testo: String(e), errore: true }; }
   }
 
   onMount(() => {
