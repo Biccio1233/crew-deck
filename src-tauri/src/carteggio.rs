@@ -70,7 +70,7 @@ Rispondi SOLO con un oggetto JSON, senza testo prima o dopo:
 {"professionista": "...", "materiale": "...", "metodi": "...", "prova": "...", "fuori": "...", "domande": ["..."], "prompt": "la richiesta riscritta"}"#;
 
 /// Risposta dei pulsanti quando il testo parla di password o credenziali (l'interfaccia la mostra com'è).
-pub(crate) const NON_INVIATO: &str = "Non inviato: il testo parla di password o credenziali";
+pub const NON_INVIATO: &str = "Non inviato: il testo parla di password o credenziali";
 
 /// Riscrive il prompt con Claude (abbonamento dell'utente, niente strumenti, niente sessione salvata).
 pub fn riscrivi(modo: &str, testo: &str, prima: Option<&str>, mancanti: &[String]) -> Result<Value, String> {

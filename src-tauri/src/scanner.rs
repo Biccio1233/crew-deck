@@ -24,6 +24,9 @@ pub struct Vista {
     pub richiesta: Option<String>,
     /// Coda dell'ultimo messaggio dell'agente (solo locale, per il carteggio).
     pub ultima_risposta: Option<String>,
+    /// La risposta intera parlava di password o credenziali (la coda in `ultima_risposta` può non dirlo).
+    #[serde(skip)]
+    pub risposta_sensibile: bool,
     pub n_richieste: u32,
     pub inizio: Option<i64>,
     /// Inizio del turno in corso (ultima richiesta dell'utente), per distinguere i turni.
@@ -138,16 +141,16 @@ impl Scanner {
         self.chiuse.get(k).map(|t| ultima_attivita <= *t).unwrap_or(false)
     }
 
-    /// Ultima richiesta e ultima risposta di una sessione.
-    pub fn conversazione(&self, agente: Agente, id: &str) -> Option<(Option<String>, Option<String>)> {
+    /// Ultima richiesta, ultima risposta e se la risposta intera era sensibile.
+    pub fn conversazione(&self, agente: Agente, id: &str) -> Option<(Option<String>, Option<String>, bool)> {
         let l = self.lettori.values().find(|l| l.acc.agente == agente && l.acc.id == id)?;
-        Some((l.acc.ultimo_prompt.clone(), l.acc.ultimo_testo.clone()))
+        Some((l.acc.ultimo_prompt.clone(), l.acc.ultimo_testo.clone(), l.acc.ultimo_testo_sensibile))
     }
 
-    /// Contesto per il carteggio: posizione, ultimo messaggio dell'agente, cartella.
-    pub fn contesto(&self, agente: Agente, id: &str) -> Option<(Option<Posizione>, Option<String>, Option<String>)> {
+    /// Contesto per il carteggio: posizione, ultimo messaggio dell'agente e se quel messaggio intero era sensibile.
+    pub fn contesto(&self, agente: Agente, id: &str) -> Option<(Option<Posizione>, Option<String>, bool)> {
         let l = self.lettori.values().find(|l| l.acc.agente == agente && l.acc.id == id)?;
-        Some((self.posizioni.get(&chiave(agente, id)).cloned(), l.acc.ultimo_testo.clone(), l.acc.cwd.clone()))
+        Some((self.posizioni.get(&chiave(agente, id)).cloned(), l.acc.ultimo_testo.clone(), l.acc.ultimo_testo_sensibile))
     }
 
     /// Dati per le azioni: posizione, file, cartella, ultima app.
@@ -184,6 +187,7 @@ impl Scanner {
                     modello: a.modello.clone(),
                     richiesta: a.ultimo_prompt.clone(),
                     ultima_risposta: if a.automatica { None } else { a.ultimo_testo.clone() },
+                    risposta_sensibile: a.ultimo_testo_sensibile,
                     n_richieste: a.n_prompt,
                     inizio: a.inizio,
                     inizio_turno: a.inizio_turno,

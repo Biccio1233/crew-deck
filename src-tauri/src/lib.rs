@@ -61,7 +61,7 @@ fn revisione(v: &Vista) -> i64 {
 }
 
 fn lavoro_da(v: &Vista, attesa: Option<String>) -> riassunti::Lavoro {
-    riassunti::Lavoro { chiave: scanner::chiave(v.agente, &v.id), richiesta: v.richiesta.clone(), risposta: v.ultima_risposta.clone(), attesa, revisione: revisione(v) }
+    riassunti::Lavoro { chiave: scanner::chiave(v.agente, &v.id), richiesta: v.richiesta.clone(), risposta: v.ultima_risposta.clone(), attesa, revisione: revisione(v), risposta_sensibile: v.risposta_sensibile }
 }
 
 /// Interruttore «Riassunti automatici» (spento all'avvio).
@@ -200,38 +200,46 @@ fn apri_sessione(plancia: tauri::State<Plancia>, agente: String, id: String, ter
     azioni::riprendi(ag, &id, &file, &cwd, &term)
 }
 
-fn contesto_di(plancia: &tauri::State<Plancia>, agente: &Option<String>, id: &Option<String>) -> (Option<localizza::Posizione>, Option<String>) {
+/// Posizione, ultimo messaggio dell'agente e se quel messaggio intero parlava di password o credenziali.
+fn contesto_di(plancia: &tauri::State<Plancia>, agente: &Option<String>, id: &Option<String>) -> (Option<localizza::Posizione>, Option<String>, bool) {
     match (agente, id) {
         (Some(a), Some(i)) => match agente_da(a) {
             Ok(ag) => {
                 let mut s = plancia.0.lock().unwrap();
                 s.localizza_ora();
-                s.contesto(ag, i).map(|(p, t, _)| (p, t)).unwrap_or((None, None))
+                s.contesto(ag, i).unwrap_or((None, None, false))
             }
-            Err(_) => (None, None),
+            Err(_) => (None, None, false),
         },
-        _ => (None, None),
+        _ => (None, None, false),
     }
 }
 
 /// Giudizio di Jev sul prompt, con l'ultimo messaggio dell'agente della sessione scelta come contesto.
 #[tauri::command]
 async fn giudica_prompt(plancia: tauri::State<'_, Plancia>, testo: String, agente: Option<String>, id: Option<String>) -> Result<serde_json::Value, String> {
-    let (_, prima) = contesto_di(&plancia, &agente, &id);
+    let (_, prima, prima_sensibile) = contesto_di(&plancia, &agente, &id);
+    // come fa giudice.py con un testo sensibile; serve qui perché `prima` è solo la coda della risposta
+    if prima_sensibile {
+        return Ok(serde_json::json!({"saltato": "sensibile"}));
+    }
     tauri::async_runtime::spawn_blocking(move || carteggio::giudica(&testo, prima.as_deref())).await.map_err(|e| e.to_string())?
 }
 
 /// Rifinisci o Approfondisci con Claude.
 #[tauri::command]
 async fn riscrivi_prompt(plancia: tauri::State<'_, Plancia>, modo: String, testo: String, agente: Option<String>, id: Option<String>, mancanti: Vec<String>) -> Result<serde_json::Value, String> {
-    let (_, prima) = contesto_di(&plancia, &agente, &id);
+    let (_, prima, prima_sensibile) = contesto_di(&plancia, &agente, &id);
+    if prima_sensibile {
+        return Err(carteggio::NON_INVIATO.into());
+    }
     tauri::async_runtime::spawn_blocking(move || carteggio::riscrivi(&modo, &testo, prima.as_deref(), &mancanti)).await.map_err(|e| e.to_string())?
 }
 
 /// Scrive il prompt nella scheda della sessione (solo dopo la conferma nell'interfaccia).
 #[tauri::command]
 async fn invia_prompt(plancia: tauri::State<'_, Plancia>, agente: String, id: String, testo: String, invio: bool) -> Result<String, String> {
-    let (pos, _) = contesto_di(&plancia, &Some(agente), &Some(id));
+    let (pos, _, _) = contesto_di(&plancia, &Some(agente), &Some(id));
     let pos = pos.ok_or("la sessione non è aperta in nessun terminale: usa «Nuova sessione»")?;
     tauri::async_runtime::spawn_blocking(move || carteggio::invia(&pos, &testo, invio)).await.map_err(|e| e.to_string())?
 }
@@ -240,10 +248,13 @@ async fn invia_prompt(plancia: tauri::State<'_, Plancia>, agente: String, id: St
 #[tauri::command]
 async fn suggerisci_risposta(plancia: tauri::State<'_, Plancia>, agente: String, id: String) -> Result<serde_json::Value, String> {
     let ag = agente_da(&agente)?;
-    let (richiesta, risposta) = {
+    let (richiesta, risposta, risposta_sensibile) = {
         let s = plancia.0.lock().unwrap();
         s.conversazione(ag, &id).ok_or("sessione non trovata")?
     };
+    if risposta_sensibile {
+        return Err(carteggio::NON_INVIATO.into());
+    }
     let risposta = risposta.ok_or("l'agente non ha ancora risposto")?;
     tauri::async_runtime::spawn_blocking(move || carteggio::suggerisci(richiesta.as_deref(), &risposta)).await.map_err(|e| e.to_string())?
 }

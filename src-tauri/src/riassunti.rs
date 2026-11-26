@@ -125,6 +125,8 @@ pub struct Lavoro {
     pub attesa: Option<String>,
     /// `max(ultima_attivita, da_quando)`: il segnale dell'hook sposta `da_quando` senza muovere il registro.
     pub revisione: i64,
+    /// La risposta intera parlava di password o credenziali: la coda in `risposta` può non dirlo.
+    pub risposta_sensibile: bool,
 }
 
 /// Lavori in attesa, uno per sessione: chi arriva dopo prende il posto di quello che non è ancora partito.
@@ -183,7 +185,7 @@ fn da_saltare(dir: &Path, l: &Lavoro) -> bool {
     if leggi(dir, &l.chiave).is_some_and(|p| l.revisione <= p.fino_a) {
         return true;
     }
-    if [&l.richiesta, &l.risposta, &l.attesa].iter().any(|t| t.as_deref().is_some_and(sensibile)) {
+    if l.risposta_sensibile || [&l.richiesta, &l.risposta, &l.attesa].iter().any(|t| t.as_deref().is_some_and(sensibile)) {
         let _ = std::fs::remove_file(file_di(dir, &l.chiave));
         return true;
     }
@@ -197,6 +199,10 @@ fn esegui(dir: &Path, l: &Lavoro) -> Result<(), String> {
     let prec = leggi(dir, &l.chiave);
     // fail closed: senza filtro (python3 mancante o in errore) non si invia e la riga resta com'è
     let testo = richiesta_oscurata(prec.as_ref(), l, filtra).map_err(|e| format!("filtro non disponibile, non invio: {e}"))?;
+    // il consenso si ricontrolla al confine dell'invio: l'interruttore può essere stato spento mentre il lavoro aspettava o si filtrava
+    if !acceso() {
+        return Ok(());
+    }
     let mut cmd = Command::new("claude");
     cmd.args(["-p", "--tools", "", "--no-session-persistence", "--setting-sources", "", "--output-format", "text", "--model", "haiku"])
         .env("CREWDECK_GIUDICE", "0")
@@ -241,7 +247,20 @@ mod prove {
     }
 
     fn lavoro(chiave: &str, revisione: i64, attesa: Option<&str>) -> Lavoro {
-        Lavoro { chiave: chiave.into(), richiesta: Some("sistema il login".into()), risposta: Some("Fatto.".into()), attesa: attesa.map(String::from), revisione }
+        Lavoro { chiave: chiave.into(), richiesta: Some("sistema il login".into()), risposta: Some("Fatto.".into()), attesa: attesa.map(String::from), revisione, risposta_sensibile: false }
+    }
+
+    #[test]
+    fn risposta_lunga_con_password_all_inizio_non_parte() {
+        // la coda tenuta (ultimi 2000 caratteri) non dice più «password»: si decide sul testo intero
+        let mut acc = crate::model::Acc::new(crate::model::Agente::Claude, "x".into(), "/Users/mario/s.jsonl".into());
+        acc.testo_agente(&format!("Mi serve la password del database: eccola, poi continuo. {}", "a".repeat(3000)));
+        let risposta = acc.ultimo_testo.clone();
+        assert!(!risposta.as_deref().is_some_and(sensibile));
+        let l = Lavoro { risposta, risposta_sensibile: acc.ultimo_testo_sensibile, ..lavoro("claude:lunga", 5, None) };
+        let dir = std::env::temp_dir().join(format!("crewdeck-lunga-{}-{}", std::process::id(), crate::ora_ms()));
+        assert!(da_saltare(&dir, &l));
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
@@ -249,7 +268,7 @@ mod prove {
         let prec = Riassunto { su_cosa: "Demo /Users/mario".into(), esito: "scritto a /Users/mario".into(), fino_a: 1 };
         // il percorso sta proprio dove `coda` taglia: va oscurato prima, non dopo
         let risposta = format!("{}/Users/mario/progetti/x.rs{}", "a".repeat(100), "b".repeat(2490));
-        let l = Lavoro { chiave: "claude:x".into(), richiesta: Some("apri /Users/mario/y".into()), risposta: Some(risposta), attesa: Some("Chiede il permesso: cat /Users/mario/z".into()), revisione: 5 };
+        let l = Lavoro { chiave: "claude:x".into(), richiesta: Some("apri /Users/mario/y".into()), risposta: Some(risposta), attesa: Some("Chiede il permesso: cat /Users/mario/z".into()), revisione: 5, risposta_sensibile: false };
         let finto = |t: &str| Ok(t.replace("/Users/mario", "<percorso>"));
         let t = richiesta_oscurata(Some(&prec), &l, finto).unwrap();
         assert!(!t.contains("mario"), "{t}");

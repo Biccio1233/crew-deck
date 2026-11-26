@@ -57,6 +57,8 @@ pub struct Acc {
     pub ultimo_prompt: Option<String>,
     /// Ultimo testo scritto dall'agente (coda), per dare contesto al giudice e alla riscrittura.
     pub ultimo_testo: Option<String>,
+    /// L'ultimo testo intero (non solo la coda tenuta) parla di password o credenziali.
+    pub ultimo_testo_sensibile: bool,
     pub n_prompt: u32,
     pub aperti: Vec<Strumento>,
     pub ultimo_evento: Ev,
@@ -90,6 +92,7 @@ impl Acc {
             ultima_attivita: 0,
             ultimo_prompt: None,
             ultimo_testo: None,
+            ultimo_testo_sensibile: false,
             n_prompt: 0,
             aperti: Vec::new(),
             ultimo_evento: Ev::Nessuno,
@@ -111,6 +114,8 @@ impl Acc {
         let t = t.trim();
         if !t.is_empty() {
             let n = t.chars().count();
+            // si decide sul testo intero: una credenziale all'inizio di una risposta lunga sparisce dalla coda, il suo valore no
+            self.ultimo_testo_sensibile = crate::riservatezza::sensibile(t);
             self.ultimo_testo = Some(if n > 2000 { t.chars().skip(n - 2000).collect() } else { t.to_string() });
         }
     }

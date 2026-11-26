@@ -119,6 +119,7 @@ mod tests {
             modello: None,
             richiesta: None,
             ultima_risposta: None,
+            risposta_sensibile: false,
             n_richieste: 1,
             inizio: None,
             inizio_turno,
