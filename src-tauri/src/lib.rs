@@ -17,6 +17,21 @@ pub fn ora_ms() -> i64 {
     chrono::Utc::now().timestamp_millis()
 }
 
+/// Titolo e corpo della notifica per un evento; `su_cosa` è il riassunto salvato, se c'è.
+pub fn testo_notifica(e: &segnali::Evento, su_cosa: Option<&str>) -> (String, String) {
+    use segnali::Tipo;
+    let titolo = match e.tipo {
+        Tipo::Domanda | Tipo::Permesso => format!("{} ti aspetta", e.progetto),
+        Tipo::Finito => format!("{} ha finito", e.progetto),
+        Tipo::Errore => format!("{} si è fermata per un errore", e.progetto),
+    };
+    let corpo = match su_cosa {
+        Some(s) if !s.is_empty() => format!("{} · {}", e.motivo, s),
+        _ => e.motivo.clone(),
+    };
+    (titolo, corpo)
+}
+
 pub struct Plancia(pub Mutex<Scanner>);
 
 const ATTESA: &str = include_str!("../../giudice/attesa.py");
@@ -272,15 +287,23 @@ pub fn run() {
         .setup(|app| {
             // vedetta: ogni 2 secondi rilegge le code dei registri e manda lo stato all'interfaccia
             let handle = app.handle().clone();
-            std::thread::spawn(move || loop {
+            std::thread::spawn(move || {
+                use tauri_plugin_notification::NotificationExt;
+                let mut memoria = segnali::Memoria::default();
+                loop {
                 let viste = {
                     let p = handle.state::<Plancia>();
                     let mut s = p.0.lock().unwrap();
                     s.aggiorna();
                     s.viste(ora_ms())
                 };
+                for e in memoria.passaggi(&viste, ora_ms()) {
+                    let (titolo, corpo) = testo_notifica(&e, None);
+                    let _ = handle.notification().builder().title(titolo).body(corpo).show();
+                }
                 let _ = handle.emit("sessioni", &viste);
                 std::thread::sleep(Duration::from_secs(2));
+                }
             });
             Ok(())
         })
@@ -321,6 +344,29 @@ fn menu_italiano<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<
         &P::close_window(app, Some("Chiudi finestra"))?,
     ])?;
     Menu::with_items(app, &[&app_menu, &modifica, &vista, &finestra])
+}
+
+#[cfg(test)]
+mod prova_notifiche {
+    use super::*;
+    use segnali::{Evento, Tipo};
+
+    fn evento() -> Evento {
+        Evento { chiave: "k".into(), tipo: Tipo::Domanda, progetto: "crew-deck".into(), motivo: "Ti fa una domanda".into() }
+    }
+
+    #[test]
+    fn testo_notifica_domanda() {
+        let (t, c) = testo_notifica(&evento(), Some("Crew Deck — segnali"));
+        assert_eq!(t, "crew-deck ti aspetta");
+        assert_eq!(c, "Ti fa una domanda · Crew Deck — segnali");
+    }
+
+    #[test]
+    fn testo_notifica_senza_riassunto() {
+        let (_, c) = testo_notifica(&evento(), None);
+        assert_eq!(c, "Ti fa una domanda");
+    }
 }
 
 #[cfg(test)]
