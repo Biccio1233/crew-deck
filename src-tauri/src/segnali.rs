@@ -26,12 +26,14 @@ pub struct Evento {
 const PERMESSO_STIMATO_MS: i64 = 30_000;
 /// Sotto questa durata un turno finito non merita una notifica.
 const TURNO_LUNGO_MS: i64 = 120_000;
+/// Una fine vera si vede entro un giro; un Finito più vecchio è un Inattivo convertito dallo scanner.
+const FINE_FRESCA_MS: i64 = 60_000;
 
 #[derive(Default)]
 pub struct Memoria {
     primo_giro_fatto: bool,
-    /// Per sessione: stato e motivo del giro precedente.
-    precedente: HashMap<String, (Stato, Motivo)>,
+    /// Per sessione: stato, motivo e `da_quando` del giro precedente.
+    precedente: HashMap<String, (Stato, Motivo, i64)>,
     /// Per sessione: turno (`inizio_turno`) dell'ultimo permesso notificato.
     permesso_notificato: HashMap<String, i64>,
     /// Sessioni già in attesa di permesso quando le abbiamo viste la prima volta: quell'attesa non si notifica.
@@ -45,12 +47,12 @@ impl Memoria {
         for v in viste.iter().filter(|v| !v.automatica && !v.chiusa) {
             let k = chiave(v.agente, &v.id);
             let c = &v.calcolo;
-            adesso.insert(k.clone(), (c.stato, c.motivo));
+            adesso.insert(k.clone(), (c.stato, c.motivo, c.da_quando));
             let in_permesso = c.stato == Stato::Aspetta && matches!(c.motivo, Motivo::Permesso | Motivo::PermessoStimato);
             if !in_permesso {
                 self.attesa_ignorata.remove(&k);
             }
-            let Some(&(s0, m0)) = self.precedente.get(&k).filter(|_| self.primo_giro_fatto) else {
+            let Some(&(s0, m0, d0)) = self.precedente.get(&k).filter(|_| self.primo_giro_fatto) else {
                 if in_permesso {
                     self.attesa_ignorata.insert(k);
                 }
@@ -59,13 +61,16 @@ impl Memoria {
             let ignorata = self.attesa_ignorata.contains(&k);
             // ponytail: senza `inizio_turno` (sessione senza richieste) vale 0, quindi un solo permesso in tutto; per superarlo serve un id di turno vero
             let turno = v.inizio_turno.unwrap_or(0);
+            // a parità di stato e motivo, un `da_quando` nuovo è un'altra attesa o un altro turno arrivato fra due letture
+            let nuovo = |s: Stato, m: Motivo| (s0, m0) != (s, m) || d0 != c.da_quando;
+            let fine = ora - c.da_quando <= FINE_FRESCA_MS && (matches!(s0, Stato::Lavora | Stato::Aspetta) || (s0 == Stato::Finito && d0 != c.da_quando));
             let tipo = match (c.stato, c.motivo) {
-                (Stato::Aspetta, Motivo::Domanda) if (s0, m0) != (Stato::Aspetta, Motivo::Domanda) => Some((Tipo::Domanda, true)),
-                (Stato::Aspetta, Motivo::Permesso) if !ignorata && (s0, m0) != (Stato::Aspetta, Motivo::Permesso) && self.permesso_notificato.get(&k) != Some(&turno) => Some((Tipo::Permesso, true)),
+                (Stato::Aspetta, Motivo::Domanda) if nuovo(Stato::Aspetta, Motivo::Domanda) => Some((Tipo::Domanda, true)),
+                (Stato::Aspetta, Motivo::Permesso) if !ignorata && nuovo(Stato::Aspetta, Motivo::Permesso) && self.permesso_notificato.get(&k) != Some(&turno) => Some((Tipo::Permesso, true)),
                 (Stato::Aspetta, Motivo::PermessoStimato) if !ignorata && ora - (c.da_quando - SOGLIA_PERMESSO_MS) >= PERMESSO_STIMATO_MS && self.permesso_notificato.get(&k) != Some(&turno) => Some((Tipo::Permesso, true)),
                 // ogni turno finito si riassume; si notifica solo se è durato più di 2 minuti
-                (Stato::Finito, Motivo::FineTurno) if matches!(s0, Stato::Lavora | Stato::Aspetta) => Some((Tipo::Finito, v.inizio_turno.is_some_and(|t| c.da_quando - t > TURNO_LUNGO_MS))),
-                (Stato::Finito, Motivo::ErroreApi) if matches!(s0, Stato::Lavora | Stato::Aspetta) => Some((Tipo::Errore, true)),
+                (Stato::Finito, Motivo::FineTurno) if fine => Some((Tipo::Finito, v.inizio_turno.is_some_and(|t| c.da_quando - t > TURNO_LUNGO_MS))),
+                (Stato::Finito, Motivo::ErroreApi) if fine => Some((Tipo::Errore, true)),
                 _ => None,
             };
             if let Some((tipo, notifica)) = tipo {
@@ -234,6 +239,57 @@ mod tests {
         let mut m = Memoria::default();
         m.passaggi(&[vista("a", Stato::Inattivo, Motivo::Silenzio, 0, Some(0))], 1);
         assert!(m.passaggi(&[vista("a", Stato::Finito, Motivo::FineTurno, 500_000, Some(0))], 500_001).is_empty());
+    }
+
+    #[test]
+    fn finito_convertito_dopo_lungo_silenzio_non_emette() {
+        // lo scanner porta a Finito un Inattivo con processo vivo: da_quando = ultima_attivita, vecchia di almeno 10 minuti
+        let t = 10_000_000;
+        for prima in [lavora(t), vista("a", Stato::Aspetta, Motivo::Domanda, t, Some(t))] {
+            let mut m = Memoria::default();
+            m.passaggi(&[prima.clone()], t + 1);
+            m.passaggi(&[prima], t + 2);
+            let convertito = vista("a", Stato::Finito, Motivo::FineTurno, t + 5, Some(t));
+            assert!(m.passaggi(&[convertito], t + 600_005).is_empty());
+            let errore = vista("a", Stato::Finito, Motivo::ErroreApi, t + 5, Some(t));
+            let mut m = Memoria::default();
+            m.passaggi(&[lavora(t)], t + 1);
+            assert!(m.passaggi(&[errore], t + 600_005).is_empty());
+        }
+    }
+
+    #[test]
+    fn seconda_domanda_fra_due_letture_emette() {
+        let mut m = Memoria::default();
+        m.passaggi(&[lavora(0)], 1);
+        assert_eq!(m.passaggi(&[vista("a", Stato::Aspetta, Motivo::Domanda, 5, Some(0))], 6).len(), 1);
+        let e = m.passaggi(&[vista("a", Stato::Aspetta, Motivo::Domanda, 9, Some(0))], 10);
+        assert_eq!(e.len(), 1);
+        assert_eq!(e[0].tipo, Tipo::Domanda);
+    }
+
+    #[test]
+    fn secondo_permesso_fra_due_letture_emette_se_turno_nuovo() {
+        let mut m = Memoria::default();
+        m.passaggi(&[lavora(0)], 1);
+        assert_eq!(m.passaggi(&[vista("a", Stato::Aspetta, Motivo::Permesso, 5, Some(0))], 6).len(), 1);
+        // stesso turno: resta il limite di uno per turno
+        assert!(m.passaggi(&[vista("a", Stato::Aspetta, Motivo::Permesso, 8, Some(0))], 9).is_empty());
+        let e = m.passaggi(&[vista("a", Stato::Aspetta, Motivo::Permesso, 20, Some(15))], 21);
+        assert_eq!(e.len(), 1);
+        assert_eq!(e[0].tipo, Tipo::Permesso);
+    }
+
+    #[test]
+    fn secondo_turno_breve_fra_due_letture_emette() {
+        let mut m = Memoria::default();
+        m.passaggi(&[lavora(0)], 1);
+        assert_eq!(m.passaggi(&[vista("a", Stato::Finito, Motivo::FineTurno, 10, Some(0))], 11).len(), 1);
+        assert!(m.passaggi(&[vista("a", Stato::Finito, Motivo::FineTurno, 10, Some(0))], 12).is_empty());
+        let e = m.passaggi(&[vista("a", Stato::Finito, Motivo::FineTurno, 30, Some(20))], 31);
+        assert_eq!(e.len(), 1);
+        assert_eq!(e[0].tipo, Tipo::Finito);
+        assert!(!e[0].notifica);
     }
 
     #[test]
