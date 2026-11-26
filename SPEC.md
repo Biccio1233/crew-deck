@@ -8,7 +8,7 @@ Chi lavora con più agenti AI insieme (Claude Code, Codex, pi…) perde il filo:
 
 ## 2. Principi
 1. **Locale e in sola lettura.** Legge i registri che gli agenti già scrivono su disco. Non tocca le sessioni. Nessun account, nessun server.
-2. **Niente rete per default.** Le uniche uscite sono quelle che l'utente attiva: l'analisi AI delle richieste e il Porto servizi.
+2. **Niente rete per default.** Le uniche uscite sono quelle che l'utente attiva: l'analisi AI delle richieste, i riassunti automatici (spenti finché non li accetta) e il Porto servizi.
 3. **Privacy prima.** Prima di mandare testo a un modello si oscurano percorsi, nomi utente e chiavi. Le chiavi stanno solo nel portachiavi di sistema.
 4. **Stato spiegato.** Ogni stato ha un motivo leggibile ("chiede il permesso per: avviare i test"), e si dice quando è una stima.
 5. **Leggero.** Sempre acceso senza pesare: CPU vicina a zero a riposo, niente polling aggressivo.
@@ -72,6 +72,7 @@ Lo skipper sei tu. Regole in una tabella modificabile, non nel codice.
 
 ### 6.4 Notifiche
 Notifica di sistema quando una sessione passa a 🚩 o a 🏁 dopo più di N minuti di lavoro. Silenziabili per progetto. Suono opzionale (fischio da regata).
+*Stato 0.5:* notifica per domanda, permesso (certo dall'hook; stimato dopo 30 s per Codex e pi, una per turno) e turno finito dopo più di 2 minuti o fermo per errore; niente all'avvio né per sessioni automatiche o chiuse; il clic porta in primo piano Crew Deck. Silenzio per progetto e suono restano da fare.
 
 ### 6.5 Azioni (fatto il 23/11 per macOS)
 - **Apri in <app>**: se la sessione è viva, Crew Deck sa dove gira (processo → app ospite → tty) e porta in primo piano **la scheda esatta**: Ghostty, Terminale e iTerm via AppleScript sul tty; cmux via `select-workspace` + `focus-panel` usando il registro `cmux sessions list` (collegamento esatto per id di sessione). cmux accetta comandi da fuori solo in modalità password (Impostazioni › Automazione; password nel portachiavi, servizio `crew-deck`, account `cmux`); altrimenti porta cmux in primo piano. Altre app (VS Code, app Claude/Codex): attivate.
