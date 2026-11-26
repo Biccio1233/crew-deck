@@ -2,7 +2,7 @@
 //! precedente e dice quali eventi meritano una notifica. Logica pura, nessun I/O.
 use crate::engine::{Motivo, Stato, SOGLIA_PERMESSO_MS};
 use crate::scanner::{chiave, Vista};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tipo {
@@ -32,12 +32,12 @@ const FINE_FRESCA_MS: i64 = 60_000;
 #[derive(Default)]
 pub struct Memoria {
     primo_giro_fatto: bool,
-    /// Per sessione: stato, motivo e `da_quando` del giro precedente.
-    precedente: HashMap<String, (Stato, Motivo, i64)>,
+    /// Per sessione: stato, motivo, `da_quando` e `inizio_turno` del giro precedente.
+    precedente: HashMap<String, (Stato, Motivo, i64, Option<i64>)>,
     /// Per sessione: turno (`inizio_turno`) dell'ultimo permesso notificato.
     permesso_notificato: HashMap<String, i64>,
-    /// Sessioni già in attesa di permesso quando le abbiamo viste la prima volta: quell'attesa non si notifica.
-    attesa_ignorata: HashSet<String>,
+    /// Sessioni già in attesa di permesso al primo giro: quell'attesa (`inizio_turno`, `da_quando`) non si notifica.
+    attesa_ignorata: HashMap<String, (Option<i64>, i64)>,
 }
 
 impl Memoria {
@@ -47,26 +47,37 @@ impl Memoria {
         for v in viste.iter().filter(|v| !v.automatica && !v.chiusa) {
             let k = chiave(v.agente, &v.id);
             let c = &v.calcolo;
-            adesso.insert(k.clone(), (c.stato, c.motivo, c.da_quando));
+            adesso.insert(k.clone(), (c.stato, c.motivo, c.da_quando, v.inizio_turno));
             let in_permesso = c.stato == Stato::Aspetta && matches!(c.motivo, Motivo::Permesso | Motivo::PermessoStimato);
-            if !in_permesso {
+            let attesa = (v.inizio_turno, c.da_quando);
+            // l'attesa ignorata è una sola: finita quella (o arrivata un'altra), si torna a notificare
+            if self.attesa_ignorata.get(&k).is_some_and(|a| !in_permesso || *a != attesa) {
                 self.attesa_ignorata.remove(&k);
             }
-            let Some(&(s0, m0, d0)) = self.precedente.get(&k).filter(|_| self.primo_giro_fatto) else {
-                if in_permesso {
-                    self.attesa_ignorata.insert(k);
+            // primo giro: base silenziosa. Una sessione vista per la prima volta dopo parte da «in porto»,
+            // così un'attesa già aperta si notifica con le regole di sempre
+            let (s0, m0, d0, t0) = match self.precedente.get(&k) {
+                _ if !self.primo_giro_fatto => {
+                    if in_permesso {
+                        self.attesa_ignorata.insert(k, attesa);
+                    }
+                    continue;
                 }
-                continue;
+                Some(&p) => p,
+                None => (Stato::Inattivo, Motivo::Silenzio, 0, None),
             };
-            let ignorata = self.attesa_ignorata.contains(&k);
+            let ignorata = self.attesa_ignorata.contains_key(&k);
             // ponytail: senza `inizio_turno` (sessione senza richieste) vale 0, quindi un solo permesso in tutto; per superarlo serve un id di turno vero
             let turno = v.inizio_turno.unwrap_or(0);
             // a parità di stato e motivo, un `da_quando` nuovo è un'altra attesa o un altro turno arrivato fra due letture
-            let nuovo = |s: Stato, m: Motivo| (s0, m0) != (s, m) || d0 != c.da_quando;
-            let fine = ora - c.da_quando <= FINE_FRESCA_MS && (matches!(s0, Stato::Lavora | Stato::Aspetta) || (s0 == Stato::Finito && d0 != c.da_quando));
+            // (per la domanda solo se più recente: dal segnale dell'hook al registro `da_quando` torna indietro)
+            let nuova_domanda = (s0, m0) != (Stato::Aspetta, Motivo::Domanda) || c.da_quando > d0;
+            let nuovo_permesso = (s0, m0) != (Stato::Aspetta, Motivo::Permesso) || c.da_quando != d0;
+            // fra due fini serve un turno nuovo: end_turn e turn_duration, o gli api_error a ogni tentativo, sono lo stesso turno
+            let fine = ora - c.da_quando <= FINE_FRESCA_MS && (matches!(s0, Stato::Lavora | Stato::Aspetta) || (s0 == Stato::Finito && v.inizio_turno != t0));
             let tipo = match (c.stato, c.motivo) {
-                (Stato::Aspetta, Motivo::Domanda) if nuovo(Stato::Aspetta, Motivo::Domanda) => Some((Tipo::Domanda, true)),
-                (Stato::Aspetta, Motivo::Permesso) if !ignorata && nuovo(Stato::Aspetta, Motivo::Permesso) && self.permesso_notificato.get(&k) != Some(&turno) => Some((Tipo::Permesso, true)),
+                (Stato::Aspetta, Motivo::Domanda) if nuova_domanda => Some((Tipo::Domanda, true)),
+                (Stato::Aspetta, Motivo::Permesso) if !ignorata && nuovo_permesso && self.permesso_notificato.get(&k) != Some(&turno) => Some((Tipo::Permesso, true)),
                 (Stato::Aspetta, Motivo::PermessoStimato) if !ignorata && ora - (c.da_quando - SOGLIA_PERMESSO_MS) >= PERMESSO_STIMATO_MS && self.permesso_notificato.get(&k) != Some(&turno) => Some((Tipo::Permesso, true)),
                 // ogni turno finito si riassume; si notifica solo se è durato più di 2 minuti
                 (Stato::Finito, Motivo::FineTurno) if fine => Some((Tipo::Finito, v.inizio_turno.is_some_and(|t| c.da_quando - t > TURNO_LUNGO_MS))),
@@ -81,7 +92,7 @@ impl Memoria {
             }
         }
         self.permesso_notificato.retain(|k, _| adesso.contains_key(k));
-        self.attesa_ignorata.retain(|k| adesso.contains_key(k));
+        self.attesa_ignorata.retain(|k, _| adesso.contains_key(k));
         self.precedente = adesso;
         self.primo_giro_fatto = true;
         eventi
@@ -290,6 +301,63 @@ mod tests {
         assert_eq!(e.len(), 1);
         assert_eq!(e[0].tipo, Tipo::Finito);
         assert!(!e[0].notifica);
+    }
+
+    #[test]
+    fn due_fini_dello_stesso_turno_un_solo_evento() {
+        // Claude scrive end_turn e poi system/turn_duration a pochi centesimi di secondo
+        let mut m = Memoria::default();
+        m.passaggi(&[lavora(0)], 1);
+        let e = m.passaggi(&[vista("a", Stato::Finito, Motivo::FineTurno, 200_000, Some(0))], 200_001);
+        assert_eq!(e.len(), 1);
+        assert!(m.passaggi(&[vista("a", Stato::Finito, Motivo::FineTurno, 200_050, Some(0))], 200_051).is_empty());
+    }
+
+    #[test]
+    fn errori_ripetuti_nello_stesso_turno_un_solo_evento() {
+        // system/api_error a ogni tentativo
+        let mut m = Memoria::default();
+        m.passaggi(&[lavora(0)], 1);
+        assert_eq!(m.passaggi(&[vista("a", Stato::Finito, Motivo::ErroreApi, 10, Some(0))], 11).len(), 1);
+        assert!(m.passaggi(&[vista("a", Stato::Finito, Motivo::ErroreApi, 20, Some(0))], 21).is_empty());
+        assert!(m.passaggi(&[vista("a", Stato::Finito, Motivo::ErroreApi, 30, Some(0))], 31).is_empty());
+    }
+
+    #[test]
+    fn domanda_dall_hook_al_registro_non_si_ripete() {
+        // con l'hook da_quando è il segnale S; dal registro è l'inizio dello strumento Q < S
+        let mut m = Memoria::default();
+        m.passaggi(&[lavora(0)], 1);
+        assert_eq!(m.passaggi(&[vista("a", Stato::Aspetta, Motivo::Domanda, 500, Some(0))], 501).len(), 1);
+        assert!(m.passaggi(&[vista("a", Stato::Aspetta, Motivo::Domanda, 400, Some(0))], 502).is_empty());
+    }
+
+    #[test]
+    fn sessione_nuova_gia_in_attesa_emette() {
+        let t = 1_000_000;
+        let mut m = Memoria::default();
+        m.passaggi(&[lavora(t)], t + 1);
+        let e = m.passaggi(&[lavora(t), vista("b", Stato::Aspetta, Motivo::Domanda, t, Some(t))], t + 2);
+        assert_eq!(e.len(), 1);
+        assert_eq!((e[0].chiave.as_str(), e[0].tipo), ("claude:b", Tipo::Domanda));
+        let e = m.passaggi(&[lavora(t), vista("c", Stato::Aspetta, Motivo::Permesso, t, Some(t))], t + 3);
+        assert_eq!(e.len(), 1);
+        assert_eq!(e[0].tipo, Tipo::Permesso);
+        // permesso stimato: servono sempre i 30 secondi di strumento fermo
+        let stimato = vista("d", Stato::Aspetta, Motivo::PermessoStimato, t + 10_000, Some(t));
+        assert!(m.passaggi(&[lavora(t), stimato.clone()], t + 20_000).is_empty());
+        assert_eq!(m.passaggi(&[lavora(t), stimato], t + 31_000).len(), 1);
+    }
+
+    #[test]
+    fn attesa_ignorata_vale_solo_per_quell_attesa() {
+        let mut m = Memoria::default();
+        m.passaggi(&[vista("a", Stato::Aspetta, Motivo::Permesso, 5, Some(0))], 6);
+        assert!(m.passaggi(&[vista("a", Stato::Aspetta, Motivo::Permesso, 5, Some(0))], 7).is_empty());
+        // un'altra attesa, senza che nessuna lettura abbia visto la sessione uscire dal permesso
+        let e = m.passaggi(&[vista("a", Stato::Aspetta, Motivo::Permesso, 50, Some(40))], 51);
+        assert_eq!(e.len(), 1);
+        assert_eq!(e[0].tipo, Tipo::Permesso);
     }
 
     #[test]
