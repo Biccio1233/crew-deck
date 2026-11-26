@@ -6,6 +6,7 @@ pub mod localizza;
 pub mod engine;
 pub mod model;
 pub mod scanner;
+pub mod segnali;
 
 use scanner::{Scanner, Vista};
 use std::sync::Mutex;

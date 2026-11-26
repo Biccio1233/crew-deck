@@ -26,6 +26,8 @@ pub struct Vista {
     pub ultima_risposta: Option<String>,
     pub n_richieste: u32,
     pub inizio: Option<i64>,
+    /// Inizio del turno in corso (ultima richiesta dell'utente), per distinguere i turni.
+    pub inizio_turno: Option<i64>,
     pub ultima_attivita: i64,
     pub ruolo: Ruolo,
     pub token: Token,
@@ -180,6 +182,7 @@ impl Scanner {
                     ultima_risposta: if a.automatica { None } else { a.ultimo_testo.clone() },
                     n_richieste: a.n_prompt,
                     inizio: a.inizio,
+                    inizio_turno: a.inizio_turno,
                     ultima_attivita: a.ultima_attivita,
                     ruolo: ruolo(a),
                     token: a.token.clone(),
