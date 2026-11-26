@@ -2,7 +2,7 @@
 //! Metodo (non codice) da billion-context, `kernel/src/compression-rules.ts`, MIT.
 use crate::carteggio::{con_tempo, estrai_json};
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -115,54 +115,74 @@ pub struct Lavoro {
     pub ultima_attivita: i64,
 }
 
+/// Lavori in attesa, uno per sessione: chi arriva dopo prende il posto di quello che non è ancora partito.
+#[derive(Default)]
+struct InAttesa(HashMap<String, Lavoro>);
+
+impl InAttesa {
+    /// Vero se la sessione non aveva un lavoro in attesa (quindi la sua chiave va mandata al thread).
+    fn metti(&mut self, l: Lavoro) -> bool {
+        self.0.insert(l.chiave.clone(), l).is_none()
+    }
+
+    fn prendi(&mut self, chiave: &str) -> Option<Lavoro> {
+        self.0.remove(chiave)
+    }
+}
+
 /// Coda dei riassunti: un solo thread, un lavoro alla volta; la vedetta manda e non aspetta mai.
 pub struct Coda {
-    tx: Sender<Lavoro>,
-    /// Sessioni con un lavoro già in coda o in corso: non si accodano di nuovo.
-    in_coda: Arc<Mutex<HashSet<String>>>,
+    /// Il canale porta solo le chiavi; il lavoro, sempre il più recente, sta in `in_attesa`.
+    tx: Sender<String>,
+    in_attesa: Arc<Mutex<InAttesa>>,
 }
 
 impl Coda {
     pub fn avvia(dir: PathBuf) -> Coda {
-        let (tx, rx) = channel::<Lavoro>();
-        let in_coda = Arc::new(Mutex::new(HashSet::new()));
-        let in_coda2 = in_coda.clone();
+        let (tx, rx) = channel::<String>();
+        let in_attesa = Arc::new(Mutex::new(InAttesa::default()));
+        let in_attesa2 = in_attesa.clone();
         std::thread::spawn(move || {
-            for l in rx {
+            for chiave in rx {
+                let Some(l) = in_attesa2.lock().unwrap().prendi(&chiave) else { continue };
                 if let Err(e) = esegui(&dir, &l) {
                     // un errore non si riprova: il prossimo passaggio di stato porta un lavoro nuovo
                     eprintln!("riassunto di {}: {e}", l.chiave);
                 }
-                in_coda2.lock().unwrap().remove(&l.chiave);
             }
         });
-        Coda { tx, in_coda }
+        Coda { tx, in_attesa }
     }
 
     pub fn chiedi(&self, lavoro: Lavoro) {
-        if !acceso() || !self.in_coda.lock().unwrap().insert(lavoro.chiave.clone()) {
+        if !acceso() {
             return;
         }
         let chiave = lavoro.chiave.clone();
-        if self.tx.send(lavoro).is_err() {
-            self.in_coda.lock().unwrap().remove(&chiave);
+        if self.in_attesa.lock().unwrap().metti(lavoro) {
+            let _ = self.tx.send(chiave);
         }
     }
 }
 
+/// Lavoro già fatto, o con testo sensibile (richiesta, risposta o motivo dell'attesa, che per un permesso
+/// contiene l'inizio del comando). Nel secondo caso si toglie il riassunto vecchio: la riga torna sul ripiego.
+fn da_saltare(dir: &Path, l: &Lavoro) -> bool {
+    if leggi(dir, &l.chiave).is_some_and(|p| l.ultima_attivita <= p.fino_a) {
+        return true;
+    }
+    if [&l.richiesta, &l.risposta, &l.attesa].iter().any(|t| t.as_deref().is_some_and(sensibile)) {
+        let _ = std::fs::remove_file(file_di(dir, &l.chiave));
+        return true;
+    }
+    false
+}
+
 fn esegui(dir: &Path, l: &Lavoro) -> Result<(), String> {
-    if !acceso() {
+    if !acceso() || da_saltare(dir, l) {
         return Ok(());
     }
     let prec = leggi(dir, &l.chiave);
-    if prec.as_ref().is_some_and(|p| l.ultima_attivita <= p.fino_a) {
-        return Ok(());
-    }
-    if l.richiesta.as_deref().is_some_and(sensibile) || l.risposta.as_deref().is_some_and(sensibile) {
-        // niente invio; si toglie il riassunto vecchio così la riga torna sul ripiego
-        let _ = std::fs::remove_file(file_di(dir, &l.chiave));
-        return Ok(());
-    }
     let testo = richiesta(prec.as_ref(), l.richiesta.as_deref(), l.risposta.as_deref(), l.attesa.as_deref());
     let mut cmd = Command::new("claude");
     cmd.args(["-p", "--tools", "", "--no-session-persistence", "--setting-sources", "", "--output-format", "text", "--model", "haiku"])
@@ -220,6 +240,35 @@ mod prove {
         assert_eq!(s, "uno due tre quattro cinque sei sette otto");
         assert_eq!(e.split_whitespace().count(), 12);
         assert_eq!(interpreta(r#"{"su_cosa":"  ","esito":"x"}"#), None);
+    }
+
+    fn lavoro(chiave: &str, ultima_attivita: i64, attesa: Option<&str>) -> Lavoro {
+        Lavoro { chiave: chiave.into(), richiesta: Some("sistema il login".into()), risposta: Some("Fatto.".into()), attesa: attesa.map(String::from), ultima_attivita }
+    }
+
+    #[test]
+    fn attesa_sensibile_non_parte_e_toglie_il_riassunto() {
+        let dir = std::env::temp_dir().join(format!("crewdeck-attesa-{}-{}", std::process::id(), crate::ora_ms()));
+        scrivi(&dir, "claude:p", &Riassunto { su_cosa: "Demo — login".into(), esito: "fatto".into(), fino_a: 1 }).unwrap();
+        // se partisse davvero, servirebbe `claude`: qui deve fermarsi prima, senza errori
+        let l = lavoro("claude:p", 5, Some("Chiede il permesso: Esegue: export DB_PASSWORD=x"));
+        assert_eq!(da_saltare(&dir, &l), true);
+        assert_eq!(leggi(&dir, "claude:p"), None);
+        assert_eq!(da_saltare(&dir, &lavoro("claude:q", 5, Some("Ti fa una domanda"))), false);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn in_attesa_si_sostituisce_col_piu_recente() {
+        let mut p = InAttesa::default();
+        assert!(p.metti(lavoro("claude:a", 1, None)));
+        assert!(!p.metti(lavoro("claude:a", 2, Some("Ti fa una domanda"))));
+        assert!(p.metti(lavoro("claude:b", 3, None)));
+        let a = p.prendi("claude:a").unwrap();
+        assert_eq!((a.ultima_attivita, a.attesa.as_deref()), (2, Some("Ti fa una domanda")));
+        assert!(p.prendi("claude:a").is_none());
+        // preso (in corso): un lavoro nuovo si accoda di nuovo
+        assert!(p.metti(lavoro("claude:a", 4, None)));
     }
 
     #[test]

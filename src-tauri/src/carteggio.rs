@@ -17,6 +17,7 @@ pub(crate) fn con_tempo(mut cmd: Command, stdin: Option<&str>, secondi: u64) -> 
     } else {
         drop(figlio.stdin.take());
     }
+    let pid = figlio.id();
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
         let _ = tx.send(figlio.wait_with_output());
@@ -25,7 +26,12 @@ pub(crate) fn con_tempo(mut cmd: Command, stdin: Option<&str>, secondi: u64) -> 
         Ok(Ok(out)) if out.status.success() => Ok(String::from_utf8_lossy(&out.stdout).to_string()),
         Ok(Ok(out)) => Err(String::from_utf8_lossy(&out.stderr).trim().chars().take(400).collect()),
         Ok(Err(e)) => Err(e.to_string()),
-        Err(_) => Err(format!("nessuna risposta entro {secondi} secondi")),
+        Err(_) => {
+            // niente processi orfani: il figlio non è ancora stato raccolto dal thread che aspetta, quindi il pid è ancora suo.
+            // ponytail: si ferma solo il figlio, non i suoi eventuali sotto-processi; per quelli servirebbe un gruppo di processi
+            let _ = Command::new("kill").arg("-9").arg(pid.to_string()).stdout(Stdio::null()).stderr(Stdio::null()).status();
+            Err(format!("nessuna risposta entro {secondi} secondi"))
+        }
     }
 }
 
@@ -287,5 +293,16 @@ mod prova_cervello {
         let r = richiesta_crea_cervello();
         assert!(r.contains("Spiegami ogni passo"));
         assert!(r.contains("AGENTS.md"));
+    }
+
+    #[test]
+    fn con_tempo_ferma_il_processo_scaduto() {
+        // argomento insolito per ritrovare proprio questo processo
+        let mut cmd = Command::new("sleep");
+        cmd.arg("47.913");
+        assert!(con_tempo(cmd, None, 1).unwrap_err().contains("entro 1 secondi"));
+        std::thread::sleep(Duration::from_millis(300));
+        let vivo = Command::new("pgrep").args(["-f", "sleep 47.913"]).output().unwrap();
+        assert!(vivo.stdout.is_empty(), "processo rimasto vivo");
     }
 }

@@ -18,6 +18,8 @@ pub struct Evento {
     pub tipo: Tipo,
     pub progetto: String,
     pub motivo: String,
+    /// Falso per i turni brevi finiti: niente notifica, ma il riassunto sì.
+    pub notifica: bool,
 }
 
 /// Il permesso stimato diventa notifica solo dopo questo tempo di strumento fermo.
@@ -58,18 +60,19 @@ impl Memoria {
             // ponytail: senza `inizio_turno` (sessione senza richieste) vale 0, quindi un solo permesso in tutto; per superarlo serve un id di turno vero
             let turno = v.inizio_turno.unwrap_or(0);
             let tipo = match (c.stato, c.motivo) {
-                (Stato::Aspetta, Motivo::Domanda) if (s0, m0) != (Stato::Aspetta, Motivo::Domanda) => Some(Tipo::Domanda),
-                (Stato::Aspetta, Motivo::Permesso) if !ignorata && (s0, m0) != (Stato::Aspetta, Motivo::Permesso) && self.permesso_notificato.get(&k) != Some(&turno) => Some(Tipo::Permesso),
-                (Stato::Aspetta, Motivo::PermessoStimato) if !ignorata && ora - (c.da_quando - SOGLIA_PERMESSO_MS) >= PERMESSO_STIMATO_MS && self.permesso_notificato.get(&k) != Some(&turno) => Some(Tipo::Permesso),
-                (Stato::Finito, Motivo::FineTurno) if matches!(s0, Stato::Lavora | Stato::Aspetta) && v.inizio_turno.is_some_and(|t| c.da_quando - t > TURNO_LUNGO_MS) => Some(Tipo::Finito),
-                (Stato::Finito, Motivo::ErroreApi) if matches!(s0, Stato::Lavora | Stato::Aspetta) => Some(Tipo::Errore),
+                (Stato::Aspetta, Motivo::Domanda) if (s0, m0) != (Stato::Aspetta, Motivo::Domanda) => Some((Tipo::Domanda, true)),
+                (Stato::Aspetta, Motivo::Permesso) if !ignorata && (s0, m0) != (Stato::Aspetta, Motivo::Permesso) && self.permesso_notificato.get(&k) != Some(&turno) => Some((Tipo::Permesso, true)),
+                (Stato::Aspetta, Motivo::PermessoStimato) if !ignorata && ora - (c.da_quando - SOGLIA_PERMESSO_MS) >= PERMESSO_STIMATO_MS && self.permesso_notificato.get(&k) != Some(&turno) => Some((Tipo::Permesso, true)),
+                // ogni turno finito si riassume; si notifica solo se è durato più di 2 minuti
+                (Stato::Finito, Motivo::FineTurno) if matches!(s0, Stato::Lavora | Stato::Aspetta) => Some((Tipo::Finito, v.inizio_turno.is_some_and(|t| c.da_quando - t > TURNO_LUNGO_MS))),
+                (Stato::Finito, Motivo::ErroreApi) if matches!(s0, Stato::Lavora | Stato::Aspetta) => Some((Tipo::Errore, true)),
                 _ => None,
             };
-            if let Some(tipo) = tipo {
+            if let Some((tipo, notifica)) = tipo {
                 if tipo == Tipo::Permesso {
                     self.permesso_notificato.insert(k.clone(), turno);
                 }
-                eventi.push(Evento { chiave: k, tipo, progetto: v.progetto.clone(), motivo: c.azione.clone() });
+                eventi.push(Evento { chiave: k, tipo, progetto: v.progetto.clone(), motivo: c.azione.clone(), notifica });
             }
         }
         self.permesso_notificato.retain(|k, _| adesso.contains_key(k));
@@ -136,6 +139,7 @@ mod tests {
         assert_eq!(e.len(), 1);
         assert_eq!(e[0].tipo, Tipo::Domanda);
         assert_eq!(e[0].motivo, "azione");
+        assert!(e[0].notifica);
         assert!(m.passaggi(&[d], 7).is_empty());
     }
 
@@ -182,10 +186,20 @@ mod tests {
     }
 
     #[test]
-    fn finito_breve_non_emette() {
+    fn finito_breve_emette_senza_notifica() {
         let mut m = Memoria::default();
         m.passaggi(&[lavora(0)], 1);
-        assert!(m.passaggi(&[vista("a", Stato::Finito, Motivo::FineTurno, 30_000, Some(0))], 31_000).is_empty());
+        let e = m.passaggi(&[vista("a", Stato::Finito, Motivo::FineTurno, 30_000, Some(0))], 31_000);
+        assert_eq!(e.len(), 1);
+        assert_eq!(e[0].tipo, Tipo::Finito);
+        assert!(!e[0].notifica);
+        // anche dopo un'attesa (toglie l'«aspetta:» vecchio) e senza inizio_turno
+        let mut m = Memoria::default();
+        m.passaggi(&[vista("a", Stato::Aspetta, Motivo::Domanda, 0, None)], 1);
+        m.passaggi(&[vista("a", Stato::Aspetta, Motivo::Domanda, 0, None)], 2);
+        let e = m.passaggi(&[vista("a", Stato::Finito, Motivo::FineTurno, 500_000, None)], 500_001);
+        assert_eq!(e.len(), 1);
+        assert!(!e[0].notifica);
     }
 
     #[test]
@@ -195,6 +209,7 @@ mod tests {
         let e = m.passaggi(&[vista("a", Stato::Finito, Motivo::FineTurno, 121_000, Some(0))], 122_000);
         assert_eq!(e.len(), 1);
         assert_eq!(e[0].tipo, Tipo::Finito);
+        assert!(e[0].notifica);
     }
 
     #[test]
@@ -204,6 +219,7 @@ mod tests {
         let e = m.passaggi(&[vista("a", Stato::Finito, Motivo::ErroreApi, 10, Some(0))], 11);
         assert_eq!(e.len(), 1);
         assert_eq!(e[0].tipo, Tipo::Errore);
+        assert!(e[0].notifica);
     }
 
     #[test]

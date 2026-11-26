@@ -333,8 +333,10 @@ pub fn run() {
                 con_riassunti(&mut viste, &dir);
                 for e in memoria.passaggi(&viste, ora_ms()) {
                     let v = viste.iter().find(|v| scanner::chiave(v.agente, &v.id) == e.chiave);
-                    let (titolo, corpo) = testo_notifica(&e, v.and_then(|v| v.su_cosa.as_deref()));
-                    let _ = handle.notification().builder().title(titolo).body(corpo).show();
+                    if e.notifica {
+                        let (titolo, corpo) = testo_notifica(&e, v.and_then(|v| v.su_cosa.as_deref()));
+                        let _ = handle.notification().builder().title(titolo).body(corpo).show();
+                    }
                     if let Some(v) = v {
                         let attesa = matches!(e.tipo, segnali::Tipo::Domanda | segnali::Tipo::Permesso).then(|| e.motivo.clone());
                         coda.chiedi(lavoro_da(v, attesa));
@@ -342,7 +344,7 @@ pub fn run() {
                 }
                 if !avvio_fatto && riassunti::acceso() {
                     for v in viste.iter().filter(|v| v.posizione.is_some() && !v.automatica && !v.chiusa && v.su_cosa.is_none()) {
-                        coda.chiedi(lavoro_da(v, None));
+                        coda.chiedi(lavoro_da(v, (v.calcolo.stato == engine::Stato::Aspetta).then(|| v.calcolo.azione.clone())));
                     }
                     avvio_fatto = true;
                 }
@@ -397,7 +399,7 @@ mod prova_notifiche {
     use segnali::{Evento, Tipo};
 
     fn evento() -> Evento {
-        Evento { chiave: "k".into(), tipo: Tipo::Domanda, progetto: "crew-deck".into(), motivo: "Ti fa una domanda".into() }
+        Evento { chiave: "k".into(), tipo: Tipo::Domanda, progetto: "crew-deck".into(), motivo: "Ti fa una domanda".into(), notifica: true }
     }
 
     #[test]
