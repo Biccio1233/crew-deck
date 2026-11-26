@@ -11,7 +11,7 @@ L'autore tiene aperte molte sessioni (Claude Code, Codex, pi) e lavora in altre 
    - **su cosa** — l'obiettivo della sessione com'è adesso, al massimo 8 parole («Crew Deck — segnali e riga di lavoro»);
    - **esito o domanda** — al traguardo l'esito del turno, in attesa «aspetta: <cosa>» (al massimo 12 parole).
 3. Le due righe le scrive Haiku (`claude -p`) con un riassunto **incrementale**, secondo il metodo ricavato da billion-context (sotto). Interruttore per spegnere i riassunti automatici.
-4. Prima di accendere le notifiche, eliminare i **falsi «ti aspetta»**: oggi sessioni di collaudo chiuse da un giorno risultano ancora «Ti fa una domanda».
+4. ~~Eliminare i falsi «ti aspetta»~~ — verificato il 26/11: le sessioni di collaudo chiuse sono in stato «in porto»; «Ti fa una domanda» è solo la loro ultima azione mostrata. Non producono notifiche; nessuna correzione necessaria.
 
 ## Non obiettivi
 - Nessun suono, nessun numero sull'icona del Dock o della barra dei menu (resta alla 0.6).
@@ -49,7 +49,7 @@ Si prende il metodo, non il codice:
 Restano fuori: l'intermediario, gli strumenti compress/decompress, i livelli 1 e 2, la cache.
 
 ## Cosa si costruisce
-1. **Falsi «ti aspetta»**: trovare perché i segnali di sessioni chiuse restano validi oltre le 2 ore previste (`scanner.rs`, `leggi_attese`; `engine.rs`) e correggere. Prova: le sessioni `collaudo-*` di ieri non risultano più «Ti fa una domanda».
+1. (Tolto: vedi obiettivo 4.)
 2. **Passaggi di stato**: il motore confronta lo stato di ogni sessione con quello del giro precedente e produce gli eventi «ora aspetta» e «ora ha finito» (con la durata del turno). Il primo giro dopo l'avvio non produce eventi.
 3. **Notifiche** (il clic porta Crew Deck in primo piano):
    - **Domanda** (certa, dall'hook): sempre.
@@ -67,7 +67,6 @@ Restano fuori: l'intermediario, gli strumenti compress/decompress, i livelli 1 e
 - Un lavoro di 30 secondi che finisce non produce notifiche. All'avvio dell'app non arriva nessuna notifica.
 - Con l'interruttore spento non parte nessuna chiamata a `claude` e la riga mostra il ripiego.
 - Un prompt che parla di password non viene inviato (la riga usa il ripiego).
-- Le sessioni chiuse di ieri non risultano «ti aspetta».
 - Al primo avvio compare la domanda sui riassunti; finché non si risponde, nessuna chiamata a `claude`.
 - Dieci permessi nello stesso turno producono una sola notifica; un permesso stimato notifica solo dopo 30 secondi di fermo.
 - Test automatici per: eventi di passaggio (incluso il primo giro), soglia dei 2 minuti, limite di una notifica di permesso per turno, ritardo dei permessi stimati, filtro password sull'ingresso del riassunto, lettura e scrittura del file dei riassunti.
